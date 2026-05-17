@@ -1,228 +1,174 @@
-// ═══════════════════════════════════════════════════════════════
-// SIDE QUEST — ADAPTIVE TWO-STAGE GENERATION PIPELINE
-// Stage 1: Haiku + web search (research extraction)
-// Stage 2: Sonnet composition (no search by default)
-// Fallback: Sonnet + 1 targeted search if confidence is LOW
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════
+// SIDE QUEST — ADAPTIVE TWO-STAGE PIPELINE (COMPRESSED)
+// Stage 1: Haiku + web search → structured intelligence JSON
+// Stage 2: Sonnet composition → compressed premium itinerary JSON
+// Fallback: Sonnet + 1 targeted search when confidence is LOW
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── INTELLIGENCE CONFIDENCE SCORING ────────────────────────────────────────────
+// ── CONFIDENCE SCORING ──────────────────────────────────────────────────────
 function scoreIntelligence(intel) {
   if (!intel || typeof intel !== "object" || Object.keys(intel).length < 3) {
-    return { score: 0, maxScore: 15, confidence: 0, grade: "low", weakAreas: ["empty_response"], log: "Stage 1 returned empty or malformed intelligence" };
+    return { score: 0, maxScore: 15, confidence: 0, grade: "low", weakAreas: ["empty_response"], log: "Stage 1 empty" };
   }
-
   let score = 0;
   const weakAreas = [];
   const log = [];
 
-  // 1. HIDDEN GEMS — named, specific places (not generic areas) — 0-3 pts
   const gems = Array.isArray(intel.hidden_gems) ? intel.hidden_gems : [];
   const specificGems = gems.filter(g => typeof g === "string" && (g.includes("—") || g.includes(" - ") || g.length > 35));
   score += Math.min(specificGems.length, 3);
-  if (specificGems.length < 2) { weakAreas.push("hidden_gems"); log.push(`gems:${specificGems.length}/3`); }
-  else log.push(`gems:${specificGems.length}✓`);
+  if (specificGems.length < 2) { weakAreas.push("hidden_gems"); log.push(`gems:${specificGems.length}`); } else log.push(`gems:${specificGems.length}✓`);
 
-  // 2. CROWD HACKS — must contain actual timings (7 AM, before 8am, etc.) — 0-3 pts
   const hacks = Array.isArray(intel.crowd_hacks) ? intel.crowd_hacks : [];
   const timedHacks = hacks.filter(h => typeof h === "string" && /\b\d{1,2}(:\d{2})?\s*(am|pm|AM|PM)|before \d|after \d|\d:\d{2}/i.test(h));
   score += Math.min(timedHacks.length * 1.5, 3);
-  if (timedHacks.length === 0) { weakAreas.push("crowd_hacks"); log.push("hacks:no_timings"); }
-  else log.push(`hacks:${timedHacks.length}✓`);
+  if (timedHacks.length === 0) { weakAreas.push("crowd_hacks"); log.push("hacks:no_timings"); } else log.push(`hacks:${timedHacks.length}✓`);
 
-  // 3. STAY AREAS — need name + actual reasoning — 0-2 pts
   const stays = Array.isArray(intel.best_stay_areas) ? intel.best_stay_areas : [];
   const richStays = stays.filter(s => s && typeof s.why === "string" && s.why.length > 15 && s.name);
   score += Math.min(richStays.length, 2);
-  if (richStays.length < 1) { weakAreas.push("stay_areas"); log.push("stays:weak"); }
-  else log.push(`stays:${richStays.length}✓`);
+  if (richStays.length < 1) { weakAreas.push("stay_areas"); log.push("stays:weak"); } else log.push(`stays:${richStays.length}✓`);
 
-  // 4. FOOD SPOTS — named places, not just cuisine types — 0-2 pts
   const food = Array.isArray(intel.food_spots) ? intel.food_spots : [];
   const namedFood = food.filter(f => typeof f === "string" && f.length > 20 && (f.includes("—") || f.includes("-") || /[A-Z]/.test(f.slice(1))));
   score += Math.min(namedFood.length, 2);
-  if (namedFood.length < 1) { weakAreas.push("food_spots"); log.push("food:generic"); }
-  else log.push(`food:${namedFood.length}✓`);
+  if (namedFood.length < 1) { weakAreas.push("food_spots"); log.push("food:generic"); } else log.push(`food:${namedFood.length}✓`);
 
-  // 5. TOURIST TRAPS — any named specific trap — 0-1 pt
   const traps = Array.isArray(intel.tourist_traps) ? intel.tourist_traps : [];
-  const namedTraps = traps.filter(t => typeof t === "string" && t.length > 15);
-  score += namedTraps.length > 0 ? 1 : 0;
-  if (namedTraps.length === 0) { weakAreas.push("tourist_traps"); log.push("traps:none"); }
-  else log.push("traps✓");
+  score += traps.filter(t => typeof t === "string" && t.length > 15).length > 0 ? 1 : 0;
+  if (traps.length === 0) { weakAreas.push("tourist_traps"); log.push("traps:none"); } else log.push("traps✓");
 
-  // 6. SEASONALITY — destination-specific, not generic — 0-1 pt
   const seasonNotes = intel.season_notes || "";
-  const hasSeasonDepth = seasonNotes.length > 30 && !/weather can be|unpredictable|varies by/i.test(seasonNotes);
-  score += hasSeasonDepth ? 1 : 0;
-  if (!hasSeasonDepth) { weakAreas.push("seasonality"); log.push("season:shallow"); }
-  else log.push("season✓");
+  score += seasonNotes.length > 30 && !/weather can be|unpredictable|varies by/i.test(seasonNotes) ? 1 : 0;
+  if (seasonNotes.length < 30) { weakAreas.push("seasonality"); log.push("season:shallow"); } else log.push("season✓");
 
-  // 7. LOCAL TIMING — daily rhythms specific to this place — 0-1 pt
   const timing = intel.local_timing || "";
   score += timing.length > 25 ? 1 : 0;
-  if (timing.length < 25) { weakAreas.push("local_timing"); log.push("timing:thin"); }
-  else log.push("timing✓");
+  if (timing.length < 25) { weakAreas.push("local_timing"); log.push("timing:thin"); } else log.push("timing✓");
 
-  // 8. TRANSPORT NOTES — not just "use public transport" — 0-1 pt
   const transport = intel.transport_notes || "";
   score += transport.length > 20 && !/use public transport|take a taxi|rent a car/i.test(transport) ? 1 : 0;
-  if (transport.length < 20) log.push("transport:thin");
-  else log.push("transport✓");
 
-  // 9. SEASONAL WARNINGS — specific, not generic — 0-1 pt
   const warnings = Array.isArray(intel.seasonal_warnings) ? intel.seasonal_warnings : [];
-  const specificWarnings = warnings.filter(w => typeof w === "string" && w.length > 15);
-  score += specificWarnings.length > 0 ? 1 : 0;
-  if (specificWarnings.length === 0) log.push("warnings:none");
-  else log.push("warnings✓");
+  score += warnings.filter(w => typeof w === "string" && w.length > 15).length > 0 ? 1 : 0;
 
-  // PENALTY: generic travel language detected
   const allText = JSON.stringify(intel).toLowerCase();
   const genericPhrases = ["local cuisine", "popular spots", "beautiful scenery", "worth visiting", "must see", "check it out", "great place", "good food", "amazing views", "nice area", "worth a visit", "don't miss"];
-  const genericHits = genericPhrases.filter(p => allText.includes(p));
-  const penalty = genericHits.length * 0.4;
+  const penalty = genericPhrases.filter(p => allText.includes(p)).length * 0.4;
   score -= penalty;
-  if (genericHits.length > 2) { weakAreas.push("generic_language"); log.push(`generic_penalty:-${penalty.toFixed(1)}`); }
+  if (penalty > 0.8) { weakAreas.push("generic_language"); log.push(`generic:-${penalty.toFixed(1)}`); }
 
-  // BONUS: named proper nouns in text (signals actual specific research)
-  const properNounDensity = (allText.match(/\b[A-Z][a-z]{2,}\b/g) || []).length;
-  const bonus = properNounDensity > 15 ? 1 : properNounDensity > 8 ? 0.5 : 0;
-  score += bonus;
-  if (bonus > 0) log.push(`specificity_bonus:+${bonus}`);
+  const properBonus = Math.min(((allText.match(/\b[A-Z][a-z]{2,}\b/g) || []).length > 15 ? 1 : 0.5), 1);
+  score += properBonus;
 
   const finalScore = Math.max(0, score);
   const maxScore = 15;
   const confidence = finalScore / maxScore;
-  const grade = confidence >= 0.60 ? "high" : confidence >= 0.38 ? "medium" : "low";
-
-  return { score: parseFloat(finalScore.toFixed(2)), maxScore, confidence: parseFloat(confidence.toFixed(3)), grade, weakAreas, log: log.join(" | ") };
+  return { score: parseFloat(finalScore.toFixed(2)), maxScore, confidence: parseFloat(confidence.toFixed(3)), grade: confidence >= 0.60 ? "high" : confidence >= 0.38 ? "medium" : "low", weakAreas, log: log.join(" | ") };
 }
 
-// ── FALLBACK QUERY BUILDER ──────────────────────────────────────────────────────
 function buildFallbackQuery(destination, weakAreas) {
-  const priorityMap = {
+  const map = {
     hidden_gems: `hidden gems off beaten path ${destination} locals recommend forum`,
-    crowd_hacks: `${destination} best time visit avoid tourist crowds exact timing forum tips`,
-    stay_areas: `${destination} best neighbourhood to stay local advice forum`,
-    food_spots: `${destination} authentic local food spots where locals eat`,
-    tourist_traps: `${destination} tourist traps scams to avoid forum warning`,
-    seasonality: `${destination} seasonal conditions what to expect travel month`,
-    local_timing: `${destination} local life rhythm daily schedule forum tips`,
-    generic_language: `${destination} specific insider travel tips beyond typical advice`,
+    crowd_hacks: `${destination} best time visit avoid tourist crowds exact timing`,
+    stay_areas: `${destination} best neighbourhood stay local advice forum`,
+    food_spots: `${destination} authentic local food where locals eat named places`,
+    tourist_traps: `${destination} tourist traps scams to avoid`,
+    seasonality: `${destination} seasonal conditions what to expect`,
+    local_timing: `${destination} local life rhythm daily schedule tips`,
+    generic_language: `${destination} specific insider travel tips beyond typical`,
   };
-
   const priority = ["crowd_hacks", "hidden_gems", "stay_areas", "food_spots", "generic_language", "tourist_traps", "seasonality", "local_timing"];
-  const topWeak = priority.find(a => weakAreas.includes(a));
-  return priorityMap[topWeak] || `${destination} insider travel tips locals forum depth`;
+  const top = priority.find(a => weakAreas.includes(a));
+  return map[top] || `${destination} insider travel tips locals forum`;
 }
 
-// ── PROMPTS ─────────────────────────────────────────────────────────────────────
+// ── STAGE 1 ──────────────────────────────────────────────────────────────────
 const STAGE1_SYSTEM = `You are a compact travel intelligence extractor.
-Rules: MAX 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks.
-Every insight must be specific and actionable. No generic advice. Named places only.`;
+MAX 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks.
+Every insight must be named and specific. No generic advice.`;
 
 function buildStage1Prompt(form) {
-  const month = form.dateFrom
-    ? new Date(form.dateFrom).toLocaleString("en", { month: "long" })
-    : "peak season";
-  return `Extract travel intelligence for: ${form.destinations} (from ${form.departure})
+  const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
+  return `Extract travel intelligence: ${form.destinations} from ${form.departure}
 Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
 Preferences: ${form.preferences}
 
-Run exactly 3 searches:
-1. Seasonal conditions in ${month} — weather, crowd levels, what opens/closes
-2. Best neighbourhoods to stay — local forum advice, not tourist strips
-3. Insider crowd hacks and timing intelligence — exact timings required
+3 searches: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings
 
-Return ONLY this JSON (be specific — name actual places, give actual timings):
-{
-  "season_notes": "what ${month} actually means for this destination — specific",
-  "crowd_level": "low/medium/high + one-line reason",
-  "best_stay_areas": [{"name":"actual neighbourhood name","why":"one specific line","avoid_if":"one line"}],
-  "hidden_gems": ["actual named place — specific reason why locals go here"],
-  "tourist_traps": ["named specific trap — why to avoid"],
-  "crowd_hacks": ["specific hack with exact timing e.g. Arrive before 7:30 AM"],
-  "food_spots": ["Named Restaurant or Market — what to order specifically"],
-  "transport_notes": "specific local transport advice for this destination",
-  "seasonal_warnings": ["specific warning relevant to ${month}"],
-  "local_timing": "specific daily rhythms — when locals eat, best morning window, etc."
-}`;
+Return ONLY JSON:
+{"season_notes":"specific to this destination in ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order"],"transport_notes":"specific advice","seasonal_warnings":["specific to ${month}"],"local_timing":"daily rhythms specific to destination"}`;
 }
 
-const STAGE2_SYSTEM = `You are Side Quest — a premium travel blueprint creator. Editorial, insider, cinematic but compressed.
-The moat: specificity, pacing, emotional sequencing, local nuance. Every word earns its place.
-Adapt to destination culture — this could be anywhere in the world.
-Output ONLY valid JSON. No markdown, no backticks, no preamble.`;
+// ── STAGE 2 ──────────────────────────────────────────────────────────────────
+const STAGE2_SYSTEM = `You are Side Quest — a premium travel blueprint creator.
+Tone: editorial, insider, specific, emotionally intelligent. Every word earns its place.
+Globally adapted — not India-specific. Mirror destination culture.
+Output ONLY valid JSON. No markdown, no backticks, no preamble.
 
-function buildStage2Prompt(form, intelligence, confidenceInfo) {
-  const dateStr = form.dateFrom && form.dateTo ? `${form.dateFrom} to ${form.dateTo}` : form.dateFrom || "dates flexible";
-  const qualityNote = confidenceInfo.grade === "low"
-    ? `NOTE: Research intelligence is sparse for this destination. Be especially careful to use the preferences and trip context to infer specificity where data is thin. Compensate with strong pacing design and cultural nuance.`
-    : confidenceInfo.grade === "medium"
-    ? `NOTE: Intelligence in these areas was weaker — be especially specific here: ${confidenceInfo.weakAreas.join(", ")}.`
+OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
+- philosophy: max 45 words
+- tagline: max 18 words
+- memories[]: max 18 words each
+- moodTags: max 5 tags, 1-3 words each
+- timeline[].desc: max 28 words — no cinematic filler
+- tips[]: max 20 words each
+- hacks[]: max 16 words each, must include exact timing
+- warnings[]: max 15 words each
+- stay.why: max 30 words
+- stay.notWhere: ONE sentence, max 24 words, direct comparison
+- differentiators[]: max 20 words each, specific and opinionated
+- packing[]: max 12 words each
+
+DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
+PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
+The timeline structure creates pacing — let timestamps do structural work, not prose.`;
+
+function buildStage2Prompt(form, intelligence, conf) {
+  const dateStr = form.dateFrom && form.dateTo ? `${form.dateFrom} to ${form.dateTo}` : form.dateFrom || "flexible";
+  const qualityNote = conf.grade === "low"
+    ? `Intelligence sparse — compensate with strong pacing and cultural nuance. Weak areas: ${conf.weakAreas.join(", ")}.`
+    : conf.grade === "medium"
+    ? `Be especially specific in: ${conf.weakAreas.join(", ")}.`
     : "";
 
-  return `Create a Side Quest travel blueprint.
-
-RESEARCH INTELLIGENCE (confidence: ${confidenceInfo.grade} — score ${confidenceInfo.score}/${confidenceInfo.maxScore}):
-${JSON.stringify(intelligence, null, 1)}
-
-${qualityNote}
+  return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
+${JSON.stringify(intelligence)}
 
 TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.travelMode} | ${form.budget}/person
 Preferences: ${form.preferences}
+${qualityNote}
 
-RULES:
-- Pace based on what rewards staying — move on when done, extend if it earns it
-- Sunset as timeline entry with exact time — NOT a separate section
-- Every stay: specific locality + exactly why over the obvious alternative
-- Descriptions: 1-2 sentences max — specific beats verbose
-- Globally adapted — NOT assumed to be any particular country
-- Destination-culture-aware (Japan = rail/precision; Europe = walking flow; SE Asia = scooter/heat; remote = logistics-first)
-- Use research intelligence above — insert specific places, exact timings, hacks from it
-- User preferences must shape the entire arc — not just one section
+RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc.
 
-Return ONLY this JSON:
+Return ONLY this compressed JSON (respect ALL word limits above):
 {
-  "tripTitle": "cinematic title",
-  "tagline": "one evocative sentence",
-  "travelStyle": "e.g. Slow Coastal / Mountain Solitude / Urban Immersion",
-  "moodTags": ["3-5 tags"],
-  "tripPhilosophy": "2 sentences max",
-  "coreMemories": ["3-4 specific sensory moments"],
-  "tripArc": ["Arrival","Descent","Immersion","Expansion","Reflection","Return"],
-  "overview": {
-    "routeStops": ["Stop 1","Stop 2"],
-    "duration": "X days",
-    "transport": "${form.travelMode}",
-    "totalBudget": "X per person",
-    "season": "one line"
-  },
-  "days": [{
-    "dayNumber": 1,
-    "title": "title",
-    "emotionalSubtitle": "one atmospheric line",
-    "timeline": [{"time":"5:30 AM","title":"activity","description":"1-2 sentences","type":"highlight OR travel OR food OR sunset OR stay OR tip","isMustDo":false}],
-    "stay": {"locality":"name","whyHere":"2 sentences","whyNotElsewhere":"1 sentence"},
-    "insiderTips": ["tip"],
-    "crowdHacks": ["hack with exact timing"],
-    "warnings": ["warning"],
-    "budgetEstimate": "X per person"
+  "tripTitle":"title",
+  "tagline":"≤18 words",
+  "travelStyle":"style",
+  "moodTags":["≤5 tags"],
+  "philosophy":"≤45 words",
+  "memories":["≤18 words each — concrete sensory moment"],
+  "arc":["Arrival","Descent","Immersion","Expansion","Reflection","Return"],
+  "overview":{"routeStops":["Stop"],"duration":"X days","transport":"${form.travelMode}","totalBudget":"X/person","season":"one line"},
+  "days":[{
+    "dayNumber":1,
+    "title":"title",
+    "subtitle":"one atmospheric line",
+    "timeline":[{"time":"5:30 AM","title":"activity","desc":"≤28 words","type":"highlight|travel|food|sunset|stay|tip","mustDo":false}],
+    "stay":{"locality":"name","why":"≤30 words","notWhere":"≤24 words — direct comparison"},
+    "tips":["≤20 words"],
+    "hacks":["≤16 words with exact timing"],
+    "warnings":["≤15 words"],
+    "budget":"X/person"
   }],
-  "budgetBreakdown": {
-    "transport":{"amount":"X","note":"brief"},
-    "accommodation":{"amount":"X","note":"brief"},
-    "food":{"amount":"X","note":"brief"},
-    "activities":{"amount":"X","note":"brief"},
-    "misc":{"amount":"X","note":"brief"},
-    "total":"X per person"
-  },
-  "whatMakesThisDifferent": ["5 specific opinionated points"],
-  "packingNotes": ["3 specific tips for this exact trip and season"]
+  "costs":{"transport":{"amount":"X","note":"brief"},"accommodation":{"amount":"X","note":"brief"},"food":{"amount":"X","note":"brief"},"activities":{"amount":"X","note":"brief"},"misc":{"amount":"X","note":"brief"},"total":"X/person"},
+  "differentiators":["≤20 words each — specific and opinionated"],
+  "packing":["≤12 words each"]
 }`;
 }
 
-// ── HANDLER ─────────────────────────────────────────────────────────────────────
+// ── HANDLER ──────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -238,107 +184,89 @@ export default async function handler(req, res) {
   };
 
   try {
-    // ══ STAGE 1: Haiku + web search (research extraction) ══════════════════════
-    console.log(`[Stage1] Starting research for: ${form.destinations}`);
-
+    // ── STAGE 1: Haiku research ───────────────────────────────────────────────
+    console.log(`[S1] Starting: ${form.destinations}`);
     const s1 = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers,
       body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 1200,
+        model: "claude-haiku-4-5", max_tokens: 1200,
         tools: [{ type: "web_search_20250305", name: "web_search" }],
         system: STAGE1_SYSTEM,
         messages: [{ role: "user", content: buildStage1Prompt(form) }],
       }),
     });
-
     const s1Data = await s1.json();
+    console.log(`[S1] tokens: in:${s1Data.usage?.input_tokens} out:${s1Data.usage?.output_tokens}`);
+
     let intelligence = {};
     if (s1Data.content) {
       const txt = s1Data.content.filter(b => b.type === "text").map(b => b.text).join("");
-      try {
-        intelligence = JSON.parse(txt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim());
-      } catch { intelligence = {}; }
+      try { intelligence = JSON.parse(txt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim()); } catch {}
     }
 
-    // ══ CONFIDENCE EVALUATION ═══════════════════════════════════════════════════
-    const confidence = scoreIntelligence(intelligence);
-    console.log(`[Confidence] Grade:${confidence.grade} Score:${confidence.score}/${confidence.maxScore} | ${confidence.log}`);
+    // ── CONFIDENCE EVALUATION ─────────────────────────────────────────────────
+    const conf = scoreIntelligence(intelligence);
+    console.log(`[Conf] grade:${conf.grade} score:${conf.score}/${conf.maxScore} | ${conf.log}`);
 
-    // ══ ADAPTIVE FALLBACK: LOW confidence triggers premium targeted search ══════
-    if (confidence.grade === "low") {
-      const fallbackQuery = buildFallbackQuery(form.destinations, confidence.weakAreas);
-      console.log(`[Fallback] Triggered. Weak areas: ${confidence.weakAreas.join(", ")} | Query: "${fallbackQuery}"`);
-
-      const fallback = await fetch("https://api.anthropic.com/v1/messages", {
+    // ── ADAPTIVE FALLBACK ─────────────────────────────────────────────────────
+    if (conf.grade === "low") {
+      const fbQuery = buildFallbackQuery(form.destinations, conf.weakAreas);
+      console.log(`[Fallback] triggered. query: "${fbQuery}"`);
+      const fb = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", headers,
         body: JSON.stringify({
-          model: "claude-sonnet-4-5",
-          max_tokens: 800,
+          model: "claude-sonnet-4-5", max_tokens: 700,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          system: `You are a targeted travel intelligence enhancer. Run EXACTLY ONE web search. Extract only specific, actionable insights. Return compact JSON — no prose.`,
-          messages: [{
-            role: "user",
-            content: `Search for: "${fallbackQuery}"
-
-Extract and return ONLY these fields as JSON (skip any you can't find specifically):
-{
-  "hidden_gems": ["named place — specific reason"],
-  "crowd_hacks": ["specific hack with exact timing"],
-  "stay_areas": ["neighbourhood — why locals stay here"],
-  "food_spots": ["named place — what to order"],
-  "local_insights": ["specific insider insight"]
-}`
-          }],
+          system: `Run ONE targeted web search. Return compact JSON only — no prose.`,
+          messages: [{ role: "user", content: `Search: "${fbQuery}"\n\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}` }],
         }),
       });
-
-      const fbData = await fallback.json();
+      const fbData = await fb.json();
+      console.log(`[Fallback] tokens: in:${fbData.usage?.input_tokens} out:${fbData.usage?.output_tokens}`);
       if (fbData.content) {
         const fbTxt = fbData.content.filter(b => b.type === "text").map(b => b.text).join("");
         try {
-          const fbIntel = JSON.parse(fbTxt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim());
-          // Merge fallback intelligence into Stage 1 results
-          if (fbIntel.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems || []), ...fbIntel.hidden_gems].slice(0, 6);
-          if (fbIntel.crowd_hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks || []), ...fbIntel.crowd_hacks].slice(0, 5);
-          if (fbIntel.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas || []), ...fbIntel.stay_areas.map(s => ({ name: s, why: "local recommendation", avoid_if: "" }))].slice(0, 4);
-          if (fbIntel.food_spots?.length) intelligence.food_spots = [...(intelligence.food_spots || []), ...fbIntel.food_spots].slice(0, 5);
-          if (fbIntel.local_insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbIntel.local_insights].filter(Boolean).join(" | ");
-          console.log("[Fallback] Intelligence enhanced successfully");
-        } catch { console.log("[Fallback] Parse failed, proceeding with original intelligence"); }
+          const fbI = JSON.parse(fbTxt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim());
+          if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems||[]), ...fbI.hidden_gems].slice(0,6);
+          if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks||[]), ...fbI.hacks].slice(0,5);
+          if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas||[]), ...fbI.stay_areas.map(s=>({name:s,why:"local rec",avoid_if:""}))].slice(0,4);
+          if (fbI.food?.length) intelligence.food_spots = [...(intelligence.food_spots||[]), ...fbI.food].slice(0,5);
+          if (fbI.insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbI.insights].filter(Boolean).join(" | ");
+          console.log("[Fallback] intelligence merged");
+        } catch { console.log("[Fallback] parse failed, using original"); }
       }
     }
 
-    // ══ STAGE 2: Sonnet composition (no web search) ════════════════════════════
-    console.log(`[Stage2] Composing with Sonnet (fallback_used:${confidence.grade === "low"})`);
-
+    // ── STAGE 2: Sonnet composition ───────────────────────────────────────────
+    console.log(`[S2] Composing (fallback:${conf.grade==="low"})`);
     const s2 = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST", headers,
       body: JSON.stringify({
         model: "claude-sonnet-4-5",
         max_tokens: 8000,
         system: STAGE2_SYSTEM,
-        messages: [{ role: "user", content: buildStage2Prompt(form, intelligence, confidence) }],
+        messages: [{ role: "user", content: buildStage2Prompt(form, intelligence, conf) }],
       }),
     });
 
     const s2Data = await s2.json();
-if (!s2.ok) return res.status(s2.status).json({ error: s2Data.error?.message || "Composition error" });
+    if (!s2.ok) return res.status(s2.status).json({ error: s2Data.error?.message || "Composition error" });
 
-// Extract and validate JSON from response
-const rawText = (s2Data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
-const cleaned = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    // Validate JSON completeness
+    const rawText = (s2Data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+    const cleaned = rawText.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
+    console.log(`[S2] tokens: in:${s2Data.usage?.input_tokens} out:${s2Data.usage?.output_tokens} | raw_chars:${rawText.length}`);
 
-// Verify it parses before returning
-try {
-  JSON.parse(cleaned);
-} catch(parseErr) {
-  console.error("[Parse Error] Stage 2 output not valid JSON:", cleaned.slice(0, 300));
-  return res.status(500).json({ error: "Model returned invalid JSON. Try again." });
-}
+    try {
+      JSON.parse(cleaned);
+    } catch(e) {
+      console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
+      return res.status(500).json({ error: "Output truncated. Try a shorter trip or fewer days." });
+    }
 
-console.log(`[Done] Generation complete for: ${form.destinations} | confidence:${confidence.grade}`);
-return res.status(200).json(s2Data);
+    console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2Data.usage?.output_tokens}tok`);
+    return res.status(200).json(s2Data);
+
   } catch (err) {
     console.error("[Error]", err);
     return res.status(500).json({ error: err.message });

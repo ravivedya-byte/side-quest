@@ -218,33 +218,33 @@ function TripHero({ trip }) {
           {trip.moodTags?.length>0 && <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>{trip.moodTags.map((t,i) => <Badge key={i} bg="rgba(140,26,26,.25)" color={C.cream2} style={{ border:"1px solid rgba(140,26,26,.5)" }}>{t}</Badge>)}</div>}
         </div>
       </div>
-      {trip.tripArc?.length>0 && (
+      {trip.arc?.length>0 && (
         <div style={{ background:"rgba(26,4,4,.7)", border:"1px solid rgba(140,26,26,.35)", borderTop:"none", padding:"20px 24px" }}>
           <Lbl>Trip Arc</Lbl>
           <div style={{ display:"flex", alignItems:"flex-start", overflowX:"auto", paddingBottom:2 }}>
-            {trip.tripArc.map((phase,i) => (
+            {trip.arc.map((phase,i) => (
               <div key={i} style={{ display:"flex", alignItems:"flex-start", flexShrink:0 }}>
                 <div style={{ textAlign:"center", width:72 }}>
-                  <div style={{ width:28, height:28, borderRadius:"50%", background:i===0||i===trip.tripArc.length-1?C.red:"rgba(140,26,26,.35)", border:`2px solid ${C.red}`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 6px", color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:"0.58rem" }}>{i+1}</div>
-                  <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.48rem", letterSpacing:"0.07em", color:i===0||i===trip.tripArc.length-1?C.amberLight:"rgba(240,228,196,.42)", textTransform:"uppercase", lineHeight:1.3, wordBreak:"break-word" }}>{phase}</div>
+                  <div style={{ width:28, height:28, borderRadius:"50%", background:i===0||i===trip.arc.length-1?C.red:"rgba(140,26,26,.35)", border:`2px solid ${C.red}`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 6px", color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:"0.58rem" }}>{i+1}</div>
+                  <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.48rem", letterSpacing:"0.07em", color:i===0||i===trip.arc.length-1?C.amberLight:"rgba(240,228,196,.42)", textTransform:"uppercase", lineHeight:1.3, wordBreak:"break-word" }}>{phase}</div>
                 </div>
-                {i<trip.tripArc.length-1 && <div style={{ width:20, height:1, background:"rgba(140,26,26,.5)", marginTop:13, flexShrink:0 }}/>}
+                {i<trip.arc.length-1 && <div style={{ width:20, height:1, background:"rgba(140,26,26,.5)", marginTop:13, flexShrink:0 }}/>}
               </div>
             ))}
           </div>
         </div>
       )}
-      {trip.tripPhilosophy && (
+      {trip.philosophy && (
         <div style={{ background:C.redDark, border:"1px solid rgba(140,26,26,.35)", borderTop:"none", padding:"20px 24px" }}>
           <Lbl>Trip Philosophy</Lbl>
-          <p style={{ fontFamily:"'Cinzel',serif", fontWeight:400, fontSize:"0.95rem", color:C.cream2, lineHeight:1.8, textAlign:"justify" }}>{trip.tripPhilosophy}</p>
+          <p style={{ fontFamily:"'Cinzel',serif", fontWeight:400, fontSize:"0.95rem", color:C.cream2, lineHeight:1.8, textAlign:"justify" }}>{trip.philosophy}</p>
         </div>
       )}
-      {trip.coreMemories?.length>0 && (
+      {trip.memories?.length>0 && (
         <div style={{ background:"rgba(26,4,4,.5)", border:"1px solid rgba(140,26,26,.3)", borderTop:"none", borderRadius:"0 0 12px 12px", padding:"20px 24px" }}>
           <Lbl>Core Memories This Trip Will Create</Lbl>
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            {trip.coreMemories.map((m,i) => (
+            {trip.memories.map((m,i) => (
               <div key={i} style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
                 <div style={{ fontFamily:"'Cinzel',serif", fontSize:"1.2rem", color:C.red, lineHeight:1, flexShrink:0, marginTop:2, opacity:.55 }}>"</div>
                 <p style={{ fontFamily:"'Cinzel',serif", fontWeight:400, fontSize:"0.93rem", color:C.cream2, lineHeight:1.65, margin:0, textAlign:"justify" }}>{m}</p>
@@ -271,10 +271,10 @@ function Timeline({ items }) {
           <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.58rem", letterSpacing:"0.1em", color:C.amber, marginBottom:3 }}>{item.time}</div>
           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:5, flexWrap:"wrap" }}>
             <span style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"0.94rem", color:item.type==="sunset"?"#FFB200":C.cream }}>{item.title}</span>
-            {item.isMustDo && <Badge bg={C.red} color={C.cream}>Must Do</Badge>}
+            {item.mustDo && <Badge bg={C.red} color={C.cream}>Must Do</Badge>}
             {item.type==="sunset" && <Badge bg="#FFB200" color={C.ink}>Sunset</Badge>}
           </div>
-          {item.description && <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.86rem", color:"rgba(240,228,196,.62)", lineHeight:1.75, margin:0, textAlign:"justify" }}>{item.description}</p>}
+          {item.desc && <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.86rem", color:"rgba(240,228,196,.62)", lineHeight:1.75, margin:0, textAlign:"justify" }}>{item.desc}</p>}
         </div>
       ))}
     </div>
@@ -292,7 +292,7 @@ function DayCard({ day, defaultOpen=false }) {
         </div>
         <div style={{ flex:1, minWidth:0 }}>
           <div style={{ fontFamily:"'Cinzel',serif", fontWeight:700, fontSize:"0.95rem", color:C.cream, marginBottom:3, lineHeight:1.3 }}>{day.title}</div>
-          <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.82rem", color:"rgba(240,228,196,.52)" }}>{day.emotionalSubtitle}</div>
+          <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.82rem", color:"rgba(240,228,196,.52)" }}>{day.subtitle}</div>
         </div>
         <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.62rem", color:"rgba(240,228,196,.28)", flexShrink:0, marginTop:3 }}>{open?"↑":"↓"}</div>
       </div>
@@ -304,20 +304,20 @@ function DayCard({ day, defaultOpen=false }) {
               <Lbl>Where to Stay</Lbl>
               <div style={{ background:"rgba(255,255,255,.03)", border:"1px solid rgba(255,255,255,.06)", borderRadius:8, padding:"15px 17px" }}>
                 <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"0.93rem", color:C.cream, marginBottom:8 }}>{day.stay.locality}</div>
-                {day.stay.whyHere && <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.86rem", color:C.cream2, lineHeight:1.75, marginBottom:10, textAlign:"justify" }}>{day.stay.whyHere}</p>}
-                <WhyBlock label="Why not the tourist strip" text={day.stay.whyNotElsewhere}/>
+                {day.stay.why && <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.86rem", color:C.cream2, lineHeight:1.75, marginBottom:10, textAlign:"justify" }}>{day.stay.why}</p>}
+                <WhyBlock label="Why not the tourist strip" text={day.stay.notWhere}/>
               </div>
             </div>
           )}
-          {(day.insiderTips?.length||day.crowdHacks?.length||day.warnings?.length) ? (
+          {(day.tips?.length||day.hacks?.length||day.warnings?.length) ? (
             <div style={{ marginBottom:22 }}>
               <Lbl>Insider Intelligence</Lbl>
-              {day.insiderTips?.map((t,i) => <TIP key={i} t={t}/>)}
-              {day.crowdHacks?.map((t,i) => <HACK key={i} t={t}/>)}
+              {day.tips?.map((t,i) => <TIP key={i} t={t}/>)}
+              {day.hacks?.map((t,i) => <HACK key={i} t={t}/>)}
               {day.warnings?.map((t,i) => <WARN key={i} t={t}/>)}
             </div>
           ) : null}
-          {day.budgetEstimate && <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.68rem", color:C.amberLight, marginTop:4 }}><span style={{ opacity:.5, marginRight:6 }}>Day budget</span>{day.budgetEstimate}</div>}
+          {day.budget && <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.68rem", color:C.amberLight, marginTop:4 }}><span style={{ opacity:.5, marginRight:6 }}>Day budget</span>{day.budget}</div>}
         </div>
       )}
     </div>
@@ -558,7 +558,7 @@ function Result({ trip, setTrip, form, onReset }) {
             <div style={{ flex:1, height:1, background:"rgba(140,26,26,.3)" }}/>
           </div>
           {trip.days?.map((day,i) => <DayCard key={i} day={day} defaultOpen={i===0}/>)}
-          <Outro budget={trip.budgetBreakdown} different={trip.whatMakesThisDifferent} packing={trip.packingNotes}/>
+          <Outro budget={trip.costs} different={trip.differentiators} packing={trip.packing}/>
           <RefinePanel trip={trip} form={form} onUpdate={setTrip}/>
         </div>
       </div>

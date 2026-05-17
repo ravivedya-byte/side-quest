@@ -17,7 +17,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: "claude-haiku-4-5",
         max_tokens: 6000,
-        system: `You are a Side Quest travel plan refiner. Make only the changes needed. Preserve the premium, specific, insider quality throughout. Return ONLY the complete updated itinerary as valid JSON — same schema as input. No markdown, no backticks, no explanation.`,
+        system: `You are a Side Quest travel plan refiner. Make only the changes needed. Preserve premium, specific, insider quality. Return ONLY the complete updated itinerary as valid JSON — same compressed schema as input (short keys: philosophy, memories, arc, subtitle, tips, hacks, budget, costs, differentiators, packing, mustDo, desc, notWhere). No markdown, no backticks.`,
         messages: [{
           role: "user",
           content: `Current itinerary:\n${JSON.stringify(trip)}\n\nTrip context: ${tripContext}\n\nRefinement request: "${request}"\n\nMake only the necessary changes. Keep everything that doesn't need changing. Return the complete updated itinerary JSON.`
