@@ -119,13 +119,22 @@ OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 - stay.notWhere: ONE sentence, max 24 words, direct comparison
 - differentiators[]: max 20 words each, specific and opinionated
 - packing[]: max 12 words each
+- food[]: max 20 words each — named place + dish + why
+- food[]: max 20 words each — named place + what to order + why
 
+FOOD IS IMPORTANT: Every day must have 2-3 specific food recommendations. Named places, specific dishes, local context. Not "try local cuisine."
+
+FOOD IS IMPORTANT: every day needs 2-3 named food spots with specific dishes. Not generic.
 DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
 PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
 The timeline structure creates pacing — let timestamps do structural work, not prose.`;
 
 function buildStage2Prompt(form, intelligence, conf) {
   const dateStr = form.dateFrom && form.dateTo ? `${form.dateFrom} to ${form.dateTo}` : form.dateFrom || "flexible";
+  const isTransportSuggested = form.travelMode === "Suggested";
+  const transportNote = isTransportSuggested
+    ? `TRANSPORT: Evaluate the best way to reach ${form.destinations} from ${form.departure}. Consider night buses, overnight trains, direct flights. Recommend ONE specific option with departure time, arrival time, and cost. Optimise Day 1 timeline around actual arrival time.`
+    : `TRANSPORT: ${form.travelMode}`;
   const qualityNote = conf.grade === "low"
     ? `Intelligence sparse — compensate with strong pacing and cultural nuance. Weak areas: ${conf.weakAreas.join(", ")}.`
     : conf.grade === "medium"
@@ -135,7 +144,8 @@ function buildStage2Prompt(form, intelligence, conf) {
   return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
 ${JSON.stringify(intelligence)}
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.travelMode} | ${form.budget}/person
+TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.budget}/person
+${transportNote}
 Preferences: ${form.preferences}
 ${qualityNote}
 
@@ -150,12 +160,14 @@ Return ONLY this compressed JSON (respect ALL word limits above):
   "philosophy":"≤45 words",
   "memories":["≤18 words each — concrete sensory moment"],
   "arc":["Arrival","Descent","Immersion","Expansion","Reflection","Return"],
-  "overview":{"routeStops":["Stop"],"duration":"X days","transport":"${form.travelMode}","totalBudget":"X/person","season":"one line"},
+  "overview":{"routeStops":["Stop"],"duration":"X days","transport":"specific recommendation or mode","transportNote":"departure/arrival/cost if Suggested else omit","originalTransport":"${form.travelMode}","totalBudget":"X/person","season":"one line"},
   "days":[{
     "dayNumber":1,
-    "title":"title",
-    "subtitle":"one atmospheric line",
+    "place":"actual city/town/village name",
+    "title":"evocative character title",
+    "subtitle":"narrative arc — morning, afternoon, evening",    
     "timeline":[{"time":"5:30 AM","title":"activity","desc":"≤28 words","type":"highlight|travel|food|sunset|stay|tip","mustDo":false}],
+    "food":["Named Place — specific dish — context ≤20 words"],
     "stay":{"locality":"name","why":"≤30 words","notWhere":"≤24 words — direct comparison"},
     "tips":["≤20 words"],
     "hacks":["≤16 words with exact timing"],

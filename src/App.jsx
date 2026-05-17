@@ -13,7 +13,6 @@ function useGlobalStyles() {
   useEffect(() => {
     if (document.getElementById("sq-f")) return;
     const l = document.createElement("link"); l.id="sq-f"; l.rel="stylesheet"; l.href=FONTS; document.head.appendChild(l);
-    const lc = document.createElement("link"); lc.id="sq-lf"; lc.rel="stylesheet"; lc.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"; document.head.appendChild(lc);
     const s = document.createElement("style"); s.id="sq-g";
     s.textContent = `
       *, *::before, *::after { box-sizing:border-box; margin:0; padding:0; }
@@ -32,17 +31,10 @@ function useGlobalStyles() {
       .sqk:hover { border-color:rgba(250,243,224,.5)!important; color:${C.cream}!important; }
       .sqr-input:focus { outline:none; border-color:rgba(140,26,26,.7)!important; }
       textarea.sqi { resize:vertical; }
-      .leaflet-container { background:#1a0404; }
-      .leaflet-popup-content-wrapper { background:${C.redDark}; color:${C.cream}; border:1px solid rgba(140,26,26,.5); border-radius:6px; box-shadow:none; }
-      .leaflet-popup-tip { background:${C.redDark}; }
-      .leaflet-popup-content { font-family:'DM Sans',sans-serif; font-size:.82rem; font-weight:600; color:${C.cream}; margin:6px 12px; }
-      .leaflet-control-attribution { background:rgba(26,4,4,.7)!important; color:rgba(240,228,196,.4)!important; font-size:.5rem!important; }
-      .leaflet-control-attribution a { color:rgba(240,228,196,.4)!important; }
-      .leaflet-control-zoom a { background:${C.redDark}!important; color:${C.cream}!important; border-color:rgba(140,26,26,.4)!important; }
+
       @media print { .np{display:none!important;} body{background:${C.cream}!important;} .print-day{break-inside:avoid;} }
     `;
     document.head.appendChild(s);
-    const sc = document.createElement("script"); sc.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"; document.head.appendChild(sc);
   }, []);
 }
 
@@ -193,7 +185,7 @@ function TripHero({ trip }) {
         <h1 style={{ fontFamily:"'Cinzel',serif", fontWeight:700, fontSize:"clamp(1.45rem,3.5vw,2.1rem)", color:"#fff", lineHeight:1.22, marginBottom:12, letterSpacing:"0.02em" }}>{trip.tripTitle}</h1>
         <p style={{ fontFamily:"'Cinzel',serif", fontWeight:400, fontSize:"0.95rem", color:"rgba(255,255,255,.72)", lineHeight:1.65, textAlign:"justify" }}>{trip.tagline}</p>
       </div>
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", background:C.redDark, border:"1px solid rgba(140,26,26,.4)", borderTop:"none" }}>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", background:C.redDark, border:"1px solid rgba(140,26,26,.4)", borderTop:"none" }}>
         <div style={{ padding:"22px 20px", borderRight:"1px solid rgba(140,26,26,.35)" }}>
           <Lbl>Route</Lbl>
           {(trip.overview?.routeStops||[]).map((stop,i) => (
@@ -210,6 +202,11 @@ function TripHero({ trip }) {
               <div style={{ fontFamily:"'DM Sans',sans-serif", fontWeight:700, fontSize:"0.92rem", color:C.cream }}>{v}</div>
             </div>
           ))}
+          {trip.overview?.transportNote && (
+            <div style={{ background:"rgba(196,122,16,.09)", borderLeft:"2px solid rgba(196,122,16,.4)", padding:"8px 12px", borderRadius:"0 4px 4px 0", marginBottom:12 }}>
+              <p style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.65rem", color:C.amberLight, lineHeight:1.6, margin:0 }}>{trip.overview.transportNote}</p>
+            </div>
+          )}
         </div>
         <div style={{ padding:"22px 20px" }}>
           <Lbl>Budget</Lbl>
@@ -286,19 +283,33 @@ function DayCard({ day, defaultOpen=false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="print-day" style={{ background:C.redDark, border:"1px solid rgba(140,26,26,.38)", borderRadius:12, marginBottom:14, overflow:"hidden" }}>
-      <div className="sqd" onClick={() => setOpen(o=>!o)} style={{ padding:"18px 22px", cursor:"pointer", display:"flex", alignItems:"flex-start", gap:14, transition:"background .15s", borderBottom:open?"1px solid rgba(140,26,26,.3)":"none" }}>
-        <div style={{ flexShrink:0, width:38, height:38, background:C.red, borderRadius:7, display:"flex", alignItems:"center", justifyContent:"center" }}>
-          <span style={{ fontFamily:"'Anton',sans-serif", fontSize:"0.95rem", color:C.cream }}>{day.dayNumber}</span>
+      <div className="sqd" onClick={() => setOpen(o=>!o)} style={{ padding:"20px 22px 18px", cursor:"pointer", position:"relative", transition:"background .15s", borderBottom:open?"1px solid rgba(140,26,26,.3)":"none" }}>
+        <div style={{ display:"flex", alignItems:"flex-start", justifyContent:"space-between", marginBottom:6 }}>
+          <div style={{ fontFamily:"'Cinzel',serif", fontWeight:700, fontSize:"1.15rem", color:C.cream, letterSpacing:"0.02em", lineHeight:1.2 }}>{day.place || day.title}</div>
+          <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.55rem", color:C.red, letterSpacing:"0.14em", flexShrink:0, marginLeft:14, marginTop:4 }}>DAY {day.dayNumber}</div>
         </div>
-        <div style={{ flex:1, minWidth:0 }}>
-          <div style={{ fontFamily:"'Cinzel',serif", fontWeight:700, fontSize:"0.95rem", color:C.cream, marginBottom:3, lineHeight:1.3 }}>{day.title}</div>
-          <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.82rem", color:"rgba(240,228,196,.52)" }}>{day.subtitle}</div>
-        </div>
-        <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.62rem", color:"rgba(240,228,196,.28)", flexShrink:0, marginTop:3 }}>{open?"↑":"↓"}</div>
+        {day.place && day.title && day.place !== day.title && (
+          <div style={{ fontFamily:"'Cinzel',serif", fontWeight:400, fontSize:"0.85rem", color:C.amberLight, marginBottom:5, opacity:0.85 }}>{day.title}</div>
+        )}
+        <div style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.8rem", color:"rgba(240,228,196,.48)", lineHeight:1.5 }}>{day.subtitle}</div>
+        <div style={{ position:"absolute", right:20, top:22, fontFamily:"'DM Mono',monospace", fontSize:"0.6rem", color:"rgba(240,228,196,.25)" }}>{open?"↑":"↓"}</div>
       </div>
       {open && (
         <div style={{ padding:"22px" }}>
           {day.timeline?.length>0 && <div style={{ marginBottom:24 }}><Lbl>Day Schedule</Lbl><Timeline items={day.timeline}/></div>}
+          {day.food?.length > 0 && (
+            <div style={{ marginBottom:22 }}>
+              <Lbl>Food & Drink</Lbl>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {day.food.map((f,i) => (
+                  <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+                    <span style={{ color:C.sageLight, fontFamily:"'DM Mono',monospace", fontSize:"0.65rem", flexShrink:0, marginTop:3 }}>◆</span>
+                    <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.87rem", color:C.cream2, lineHeight:1.65, margin:0, textAlign:"justify" }}>{f}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {day.stay && (
             <div style={{ marginBottom:22 }}>
               <Lbl>Where to Stay</Lbl>
@@ -510,8 +521,8 @@ function Form({ form, onChange, onSubmit, err }) {
           </div>
           <div style={{ marginBottom:20 }}>
             <label style={lbl}>How are you travelling?</label>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
-              {["Road","Rail","Air"].map(mode => (
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
+              {["Suggested","Road","Rail","Air"].map(mode => (
                 <button key={mode} onClick={()=>s("travelMode",mode)}
                   style={{ padding:"13px 8px", background:form.travelMode===mode?C.red:"#fff", border:`2px solid ${form.travelMode===mode?C.red:C.cream2}`, borderRadius:8, color:form.travelMode===mode?C.cream:C.ink, fontFamily:"'DM Mono',monospace", fontSize:"0.65rem", letterSpacing:"0.12em", cursor:"pointer", transition:"all .2s", fontWeight:500 }}>
                   {mode}
@@ -551,7 +562,6 @@ function Result({ trip, setTrip, form, onReset }) {
             </div>
           </div>
           <TripHero trip={trip}/>
-          <RouteMap routeStops={trip.overview?.routeStops} departure={form.departure}/>
           <div style={{ display:"flex", alignItems:"center", gap:14, margin:"8px 0 22px" }}>
             <div style={{ flex:1, height:1, background:"rgba(140,26,26,.3)" }}/>
             <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.5rem", letterSpacing:"0.2em", color:"rgba(140,26,26,.65)", textTransform:"uppercase" }}>Day by Day</div>
@@ -569,7 +579,7 @@ function Result({ trip, setTrip, form, onReset }) {
 // ── MAIN ───────────────────────────────────────────────────────────────────────
 export default function SideQuest() {
   useGlobalStyles();
-  const [form, setForm] = useState({ destinations:"", departure:"", dateFrom:"", dateTo:"", travelMode:"Air", people:"2", budget:"", preferences:"" });
+  const [form, setForm] = useState({ destinations:"", departure:"", dateFrom:"", dateTo:"", travelMode:"Suggested", people:"2", budget:"", preferences:"" });
   const [phase, setPhase] = useState("form");
   const [trip, setTrip] = useState(null);
   const [factIdx, setFactIdx] = useState(0);
