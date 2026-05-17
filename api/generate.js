@@ -323,11 +323,22 @@ Extract and return ONLY these fields as JSON (skip any you can't find specifical
     });
 
     const s2Data = await s2.json();
-    if (!s2.ok) return res.status(s2.status).json({ error: s2Data.error?.message || "Composition error" });
+if (!s2.ok) return res.status(s2.status).json({ error: s2Data.error?.message || "Composition error" });
 
-    console.log(`[Done] Generation complete for: ${form.destinations} | confidence:${confidence.grade}`);
-    return res.status(200).json(s2Data);
+// Extract and validate JSON from response
+const rawText = (s2Data.content || []).filter(b => b.type === "text").map(b => b.text).join("");
+const cleaned = rawText.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
 
+// Verify it parses before returning
+try {
+  JSON.parse(cleaned);
+} catch(parseErr) {
+  console.error("[Parse Error] Stage 2 output not valid JSON:", cleaned.slice(0, 300));
+  return res.status(500).json({ error: "Model returned invalid JSON. Try again." });
+}
+
+console.log(`[Done] Generation complete for: ${form.destinations} | confidence:${confidence.grade}`);
+return res.status(200).json(s2Data);
   } catch (err) {
     console.error("[Error]", err);
     return res.status(500).json({ error: err.message });
