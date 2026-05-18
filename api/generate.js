@@ -125,7 +125,10 @@ OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 FOOD IS IMPORTANT: Every day must have 2-3 specific food recommendations. Named places, specific dishes, local context. Not "try local cuisine."
 
 FOOD IS IMPORTANT: every day needs 2-3 named food spots with specific dishes. Not generic.
-GEOGRAPHIC FLOW — MANDATORY: Each day must follow a continuous geographic arc. Identify the 1-2 anchor activities with fixed optimal times (sunrise spot, sunset spot, crowd-sensitive site before 9 AM). Schedule anchors at their ideal time first. Then build the rest of the day around the natural geographic path between anchors — the route should curve, not zigzag. Never send someone to a place, then to the opposite side, then back. Activities should flow in one geographic direction. Consider: morning activities near arrival point, midday toward the day's main destination, evening near stay.
+GEOGRAPHIC FLOW — MANDATORY: Every day has exactly two non-negotiable anchors scheduled first:
+ANCHOR 1 — SUNSET: Identify the single best sunset spot for this day's location. Position the group there 25-30 minutes before actual sunset time. This is the fixed endpoint the entire afternoon must flow toward geographically. After 3 PM the route must be moving toward or already near the sunset point. Never place the sunset spot as an afterthought.
+ANCHOR 2 — TOP TIME-SENSITIVE ACTIVITY: The one activity most dependent on a specific time window (temple before 8:30 AM, waterfall at dawn, market at sunrise). Lock it at its optimal time.
+Build all other activities as a continuous geographic arc connecting these two anchors. Route curves — never zigzags. Morning near the day's start point, afternoon drifting toward the sunset location, evening at the sunset spot. Travel between activities should feel like a natural drift, not commuting.
 
 DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
 PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
@@ -146,12 +149,12 @@ function buildStage2Prompt(form, intelligence, conf) {
   return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
 ${JSON.stringify(intelligence)}
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.budget}/person
+TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
 ${transportNote}
 Preferences: ${form.preferences}
 ${qualityNote}
 
-RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc.
+RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc. Use ${form.currencySymbol || "₹"} for ALL monetary values. Never mix currencies.
 
 Return ONLY this compressed JSON (respect ALL word limits above):
 {
