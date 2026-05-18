@@ -149,12 +149,12 @@ function buildStage2Prompt(form, intelligence, conf) {
   return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
 ${JSON.stringify(intelligence)}
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
+TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.budget}/person
 ${transportNote}
 Preferences: ${form.preferences}
 ${qualityNote}
 
-RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc. Use ${form.currencySymbol || "₹"} for ALL monetary values. Never mix currencies.
+RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc. Use the same currency symbol the user entered in their budget (e.g. ₹, $, €) for ALL monetary values. Never mix currencies.
 
 Return ONLY this compressed JSON (respect ALL word limits above):
 {
