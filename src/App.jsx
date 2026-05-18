@@ -32,7 +32,17 @@ function useGlobalStyles() {
       .sqr-input:focus { outline:none; border-color:rgba(140,26,26,.7)!important; }
       textarea.sqi { resize:vertical; }
 
-      @media print { .np{display:none!important;} body{background:${C.cream}!important;} .print-day{break-inside:avoid;} }
+      @media print {
+        .np { display:none!important; }
+        .sq-refine { display:none!important; }
+        * { -webkit-print-color-adjust:exact!important; print-color-adjust:exact!important; }
+        html,body { background:#1a0404!important; height:auto!important; min-height:0!important; margin:0!important; padding:0!important; }
+        #sq-result { min-height:0!important; height:auto!important; padding-bottom:0!important; }
+        .print-day { break-inside:avoid; page-break-inside:avoid; margin-bottom:12px!important; }
+        .sq-outro { break-inside:avoid; }
+        table { break-inside:avoid; }
+        h1,h2,h3 { break-after:avoid; }
+      }
     `;
     document.head.appendChild(s);
   }, []);
@@ -215,22 +225,7 @@ function TripHero({ trip }) {
           {trip.moodTags?.length>0 && <div style={{ display:"flex", flexWrap:"wrap", gap:5 }}>{trip.moodTags.map((t,i) => <Badge key={i} bg="rgba(140,26,26,.25)" color={C.cream2} style={{ border:"1px solid rgba(140,26,26,.5)" }}>{t}</Badge>)}</div>}
         </div>
       </div>
-      {trip.arc?.length>0 && (
-        <div style={{ background:"rgba(26,4,4,.7)", border:"1px solid rgba(140,26,26,.35)", borderTop:"none", padding:"20px 24px" }}>
-          <Lbl>Trip Arc</Lbl>
-          <div style={{ display:"flex", alignItems:"flex-start", overflowX:"auto", paddingBottom:2 }}>
-            {trip.arc.map((phase,i) => (
-              <div key={i} style={{ display:"flex", alignItems:"flex-start", flexShrink:0 }}>
-                <div style={{ textAlign:"center", width:72 }}>
-                  <div style={{ width:28, height:28, borderRadius:"50%", background:i===0||i===trip.arc.length-1?C.red:"rgba(140,26,26,.35)", border:`2px solid ${C.red}`, display:"flex", alignItems:"center", justifyContent:"center", margin:"0 auto 6px", color:C.cream, fontFamily:"'DM Mono',monospace", fontSize:"0.58rem" }}>{i+1}</div>
-                  <div style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.48rem", letterSpacing:"0.07em", color:i===0||i===trip.arc.length-1?C.amberLight:"rgba(240,228,196,.42)", textTransform:"uppercase", lineHeight:1.3, wordBreak:"break-word" }}>{phase}</div>
-                </div>
-                {i<trip.arc.length-1 && <div style={{ width:20, height:1, background:"rgba(140,26,26,.5)", marginTop:13, flexShrink:0 }}/>}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
       {trip.philosophy && (
         <div style={{ background:C.redDark, border:"1px solid rgba(140,26,26,.35)", borderTop:"none", padding:"20px 24px" }}>
           <Lbl>Trip Philosophy</Lbl>
@@ -338,12 +333,11 @@ function DayCard({ day, defaultOpen=false }) {
 // ── OUTRO ──────────────────────────────────────────────────────────────────────
 function Outro({ budget, different, packing }) {
   return (
-    <div style={{ marginTop:40 }}>
+    <div className="sq-outro" style={{ marginTop:40 }}>
       {budget && (
         <div style={{ background:C.redDark, border:"1px solid rgba(140,26,26,.38)", borderRadius:12, padding:"26px", marginBottom:16 }}>
           <Lbl>Budget Breakdown — Per Person</Lbl>
-          <div style={{ overflowX:"auto" }}>
-            <table style={{ width:"100%", minWidth:320, borderCollapse:"collapse", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse", fontFamily:"'DM Mono',monospace", fontSize:"0.8rem" }}>
               <thead><tr>{["Category","Amount","Notes"].map((h,i) => <th key={i} style={{ background:C.red, color:C.cream, padding:"10px 13px", textAlign:"left", fontSize:"0.55rem", letterSpacing:"0.14em", textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>)}</tr></thead>
               <tbody>
                 {Object.entries(budget).filter(([k]) => k!=="total").map(([key,val],i) => (
@@ -358,8 +352,7 @@ function Outro({ budget, different, packing }) {
                   <td style={{ padding:"11px 13px", borderTop:`2px solid ${C.red}`, color:C.amberLight, fontWeight:700, fontSize:"0.88rem" }}>{budget.total}</td>
                 </tr>
               </tbody>
-            </table>
-          </div>
+          </table>
         </div>
       )}
       {different?.length>0 && (
@@ -416,7 +409,7 @@ function RefinePanel({ trip, form, onUpdate }) {
   };
 
   return (
-    <div style={{ marginTop:32, background:C.redDark, border:"1px solid rgba(140,26,26,.38)", borderRadius:12, padding:"28px 26px" }}>
+    <div className="sq-refine" style={{ marginTop:32, background:C.redDark, border:"1px solid rgba(140,26,26,.38)", borderRadius:12, padding:"28px 26px" }}>
       <Lbl>Refine Your Trip</Lbl>
       <p style={{ fontFamily:"'DM Sans',sans-serif", fontSize:"0.82rem", color:"rgba(240,228,196,.45)", marginBottom:18, lineHeight:1.6 }}>
         Add nightlife · Make it more relaxed · Swap a day for hiking · Add photography spots · Avoid crowded places · Increase budget slightly
@@ -550,7 +543,7 @@ function Form({ form, onChange, onSubmit, err }) {
 function Result({ trip, setTrip, form, onReset }) {
   const handleExport = () => window.print();
   return (
-    <div style={{ minHeight:"100vh", background:C.redDeep }}>
+    <div id="sq-result" style={{ background:C.redDeep }}>
       <div className="np"><Ticker/></div>
       <div style={{ padding:"26px 20px 80px" }}>
         <div style={{ maxWidth:820, margin:"0 auto" }}>

@@ -125,6 +125,8 @@ OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 FOOD IS IMPORTANT: Every day must have 2-3 specific food recommendations. Named places, specific dishes, local context. Not "try local cuisine."
 
 FOOD IS IMPORTANT: every day needs 2-3 named food spots with specific dishes. Not generic.
+GEOGRAPHIC FLOW — MANDATORY: Each day must follow a continuous geographic arc. Identify the 1-2 anchor activities with fixed optimal times (sunrise spot, sunset spot, crowd-sensitive site before 9 AM). Schedule anchors at their ideal time first. Then build the rest of the day around the natural geographic path between anchors — the route should curve, not zigzag. Never send someone to a place, then to the opposite side, then back. Activities should flow in one geographic direction. Consider: morning activities near arrival point, midday toward the day's main destination, evening near stay.
+
 DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
 PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
 The timeline structure creates pacing — let timestamps do structural work, not prose.`;
@@ -159,7 +161,6 @@ Return ONLY this compressed JSON (respect ALL word limits above):
   "moodTags":["≤5 tags"],
   "philosophy":"≤45 words",
   "memories":["≤18 words each — concrete sensory moment"],
-  "arc":["Arrival","Descent","Immersion","Expansion","Reflection","Return"],
   "overview":{"routeStops":["Stop"],"duration":"X days","transport":"specific recommendation or mode","transportNote":"departure/arrival/cost if Suggested else omit","originalTransport":"${form.travelMode}","totalBudget":"X/person","season":"one line"},
   "days":[{
     "dayNumber":1,
