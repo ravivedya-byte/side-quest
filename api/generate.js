@@ -86,13 +86,18 @@ function buildFallbackQuery(destination, weakAreas) {
 // ── STAGE 1 ──────────────────────────────────────────────────────────────────
 const STAGE1_SYSTEM = `You are a compact travel intelligence extractor.
 MAX 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks.
-Every insight must be named and specific. No generic advice.`;
+Every insight must be named and specific. No generic advice.
+
+SOURCE BIAS: Prioritize Reddit travel communities, long-form travel blogs, and local forum threads. Deprioritize generic aggregator listicles and SEO "top 10" pages unless they cite specific named venues with evidence.`;
 
 function buildStage1Prompt(form) {
   const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
+  const safety = form.prioritizeWomensSafety
+    ? "\nWomen's safety prioritized in this trip — when sources discuss solo/women traveller experience, neighbourhoods, or timing, fold that into stay areas, transport_notes, seasonal_warnings, and crowd_hacks where relevant. Stay factual, not alarmist."
+    : "";
   return `Extract travel intelligence: ${form.destinations} from ${form.departure}
 Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
-Preferences: ${form.preferences}
+Preferences: ${form.preferences}${safety}
 
 3 searches: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings
 
@@ -101,17 +106,42 @@ Return ONLY JSON:
 }
 
 // ── STAGE 2 ──────────────────────────────────────────────────────────────────
-const STAGE2_SYSTEM = `You are Side Quest — a premium travel blueprint creator.
-Tone: editorial, insider, specific, emotionally intelligent. Every word earns its place.
-Globally adapted — not India-specific. Mirror destination culture.
+const STAGE2_SYSTEM = `You are Side Quest — conscious travel blueprint creator for a real operator.
+
+BRAND (non-negotiable):
+(1) HELD & LOW-STRESS: Clear transitions, realistic timing, no "hero" marathon days. Guests should feel psychologically held — predictable where it matters, honest about effort.
+(2) DEPTH: Genuine depth — craft, ritual, quiet observation, meaningful local encounter — not checklist sightseeing or photo-only stops.
+(3) PACE WITH RECOVERY: After an intense morning block, include a real RECOVERY window (rest, slow walk, café, hotel downtime) as one timeline row with "type":"recovery" and a clear time range.
+
+AUDIENCE: Educated, curious; authenticity over comfort; not budget backpacker, not luxury tourist. They want to feel they went somewhere real.
+
+Tone: editorial, insider, specific, emotionally intelligent. Globally adapted — mirror destination culture (not one-country template).
 Output ONLY valid JSON. No markdown, no backticks, no preamble.
+
+PACE & ACTIVITIES:
+- Maximum 3 "major" activities per calendar day (highlight-level or long immersive blocks). Food-only stops, short transits, and "recovery" rows do NOT count toward this cap.
+- No rules for minimum or maximum nights per place — ignore night-count pacing rules.
+
+MUST-DO COVERAGE — PER DISTINCT PLACE (each major stop / city on the route):
+- Across all days spent in that place, include at least 3 timeline entries total with "mustDo": true.
+- Spread across types where the destination allows: (a) early / pre-crowd, (b) local cultural immersion (not a tourist show), (c) slow quiet moment suited to reflection, (d) offbeat angle many tourists miss.
+
+SUNSET (keep engineering + your intent):
+- Same geographic anchor rules as before: one sunset row, 25–30 min before actual sunset, afternoon routes drift toward it after 3 PM, no zigzag commuting.
+- Prefer quieter, scenic sunset spots over mob viewpoints when possible; in that row's desc, one short phrase on why this spot over the obvious one (within word limit).
+
+STAY & TRANSPORT BIAS:
+- Prefer homestays, family-run guesthouses, and small independents over big branded hotels when compatible with budget and availability.
+- Prefer public transport, shared transit, walking, and local cycling/scooter exploration when sensible — unless user preferences forbid.
+
+TRIP ARC (overall journey, not per place): Early segment: arrival and decompression. Middle: depth and immersion. Before return: integration and quieter pacing — reflect in day subtitles and philosophy where natural.
 
 OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 - philosophy: max 45 words
 - tagline: max 18 words
 - memories[]: max 18 words each
 - moodTags: max 5 tags, 1-3 words each
-- timeline[].desc: max 28 words — no cinematic filler
+- timeline[].desc: max 28 words — no cinematic filler (sunset row: squeeze "why this spot" into this limit)
 - tips[]: max 20 words each
 - hacks[]: max 16 words each, must include exact timing
 - warnings[]: max 15 words each
@@ -120,15 +150,13 @@ OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 - differentiators[]: max 20 words each, specific and opinionated
 - packing[]: max 12 words each
 - food[]: max 20 words each — named place + dish + why
-- food[]: max 20 words each — named place + what to order + why
 
-FOOD IS IMPORTANT: Every day must have 2-3 specific food recommendations. Named places, specific dishes, local context. Not "try local cuisine."
+FOOD: Every day needs 2-3 named food spots with specific dishes. Not "try local cuisine."
 
-FOOD IS IMPORTANT: every day needs 2-3 named food spots with specific dishes. Not generic.
 GEOGRAPHIC FLOW — MANDATORY: Every day has exactly two non-negotiable anchors scheduled first:
-ANCHOR 1 — SUNSET: Identify the single best sunset spot for this day's location. Position the group there 25-30 minutes before actual sunset time. This is the fixed endpoint the entire afternoon must flow toward geographically. After 3 PM the route must be moving toward or already near the sunset point. Never place the sunset spot as an afterthought.
+ANCHOR 1 — SUNSET: (as above)
 ANCHOR 2 — TOP TIME-SENSITIVE ACTIVITY: The one activity most dependent on a specific time window (temple before 8:30 AM, waterfall at dawn, market at sunrise). Lock it at its optimal time.
-Build all other activities as a continuous geographic arc connecting these two anchors. Route curves — never zigzags. Morning near the day's start point, afternoon drifting toward the sunset location, evening at the sunset spot. Travel between activities should feel like a natural drift, not commuting.
+Build all other activities as a continuous geographic arc connecting these two anchors. Route curves — never zigzags.
 
 DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
 PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
@@ -146,15 +174,20 @@ function buildStage2Prompt(form, intelligence, conf) {
     ? `Be especially specific in: ${conf.weakAreas.join(", ")}.`
     : "";
 
+  const safetyNote = form.prioritizeWomensSafety
+    ? `WOMEN'S SAFETY: Prioritized for this trip — bias toward well-reviewed areas for women/solo travellers, sensible arrival times on long legs, reputable stays, and concise practical tips in warnings where useful. Never fearmonger or victim-blame.`
+    : "";
+
   return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
 ${JSON.stringify(intelligence)}
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | ${form.budget}/person
+TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
 ${transportNote}
 Preferences: ${form.preferences}
+${safetyNote}
 ${qualityNote}
 
-RULES: Pace by what rewards staying. Sunset in timeline only. Specific locality + why for every stay. 1-2 sentence max descriptions. Use research intel — real places, real timings. Preferences shape the entire arc. Use the same currency symbol the user entered in their budget (e.g. ₹, $, €) for ALL monetary values. Never mix currencies.
+RULES: Conscious pace — respect max 3 major activities/day, mandatory recovery after intense mornings, Must-Do coverage per place, held-and-deep brand above. Sunset in timeline only (one sunset row per day). Specific locality + why for every stay. Use research intel — real places, real timings. Preferences shape the entire arc. Use ${form.currencySymbol || "₹"} for ALL monetary values. Never mix currencies.
 
 Return ONLY this compressed JSON (respect ALL word limits above):
 {
@@ -170,7 +203,7 @@ Return ONLY this compressed JSON (respect ALL word limits above):
     "place":"actual city/town/village name",
     "title":"evocative character title",
     "subtitle":"narrative arc — morning, afternoon, evening",    
-    "timeline":[{"time":"5:30 AM","title":"activity","desc":"≤28 words","type":"highlight|travel|food|sunset|stay|tip","mustDo":false}],
+    "timeline":[{"time":"5:30 AM","title":"activity","desc":"≤28 words","type":"highlight|travel|food|sunset|stay|tip|recovery","mustDo":false}],
     "food":["Named Place — specific dish — context ≤20 words"],
     "stay":{"locality":"name","why":"≤30 words","notWhere":"≤24 words — direct comparison"},
     "tips":["≤20 words"],
