@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 // ═══════════════════════════════════════════════════════════════════════════
 // SIDE QUEST — ADAPTIVE TWO-STAGE PIPELINE (COMPRESSED)
 // Stage 1: DeepSeek Flash → structured intelligence JSON
@@ -128,6 +130,21 @@ function cleanJsonText(text = "") {
   }
 
   return cleaned;
+}
+
+function parseOrRepairJson(text, label) {
+  const cleaned = cleanJsonText(text);
+  try {
+    return { json: JSON.parse(cleaned), text: cleaned, repaired: false };
+  } catch (initialErr) {
+    try {
+      const repairedText = cleanJsonText(jsonrepair(cleaned));
+      return { json: JSON.parse(repairedText), text: repairedText, repaired: true };
+    } catch (repairErr) {
+      repairErr.message = `${label} parse failed: ${initialErr.message}; jsonrepair failed: ${repairErr.message}`;
+      throw repairErr;
+    }
+  }
 }
 
 async function repairJSON({ rawText, parseError, context }) {
@@ -312,7 +329,13 @@ export default async function handler(req, res) {
     console.log(`[S1] tokens: in:${s1.usage?.prompt_tokens} out:${s1.usage?.completion_tokens}`);
 
     let intelligence = {};
-    try { intelligence = JSON.parse(s1.text); } catch {}
+    try {
+      const parsed = parseOrRepairJson(s1.text, "Stage 1 intelligence");
+      intelligence = parsed.json;
+      if (parsed.repaired) console.log("[S1] jsonrepair fixed intelligence JSON");
+    } catch (e) {
+      console.log(`[S1] parse failed, continuing with empty intelligence: ${e.message}`);
+    }
 
     // ── CONFIDENCE EVALUATION ─────────────────────────────────────────────────
     const conf = scoreIntelligence(intelligence);
@@ -330,7 +353,9 @@ export default async function handler(req, res) {
       });
       console.log(`[Fallback] tokens: in:${fb.usage?.prompt_tokens} out:${fb.usage?.completion_tokens}`);
       try {
-        const fbI = JSON.parse(fb.text);
+        const parsedFallback = parseOrRepairJson(fb.text, "Fallback intelligence");
+        const fbI = parsedFallback.json;
+        if (parsedFallback.repaired) console.log("[Fallback] jsonrepair fixed intelligence JSON");
         if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems||[]), ...fbI.hidden_gems].slice(0,6);
         if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks||[]), ...fbI.hacks].slice(0,5);
         if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas||[]), ...fbI.stay_areas.map(s=>({name:s,why:"local rec",avoid_if:""}))].slice(0,4);
@@ -354,7 +379,9 @@ export default async function handler(req, res) {
     console.log(`[S2] tokens: in:${s2.usage?.prompt_tokens} out:${s2.usage?.completion_tokens} | raw_chars:${cleaned.length}`);
 
     try {
-      JSON.parse(cleaned);
+      const parsed = parseOrRepairJson(cleaned, "Stage 2 itinerary");
+      cleaned = parsed.text;
+      if (parsed.repaired) console.log("[S2] jsonrepair fixed itinerary JSON");
     } catch(e) {
       console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
       try {
@@ -364,7 +391,7 @@ export default async function handler(req, res) {
           parseError: e.message,
           context: `${form.destinations} itinerary output`,
         });
-        JSON.parse(cleaned);
+        cleaned = parseOrRepairJson(cleaned, "Stage 2 repaired itinerary").text;
         console.log("[S2 Repair] JSON repaired successfully");
       } catch (repairErr) {
         console.error(`[S2 Repair Error] ${repairErr.message} | preview: ${cleaned.slice(0,400)}`);

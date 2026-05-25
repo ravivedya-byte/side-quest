@@ -1,3 +1,5 @@
+import { jsonrepair } from "jsonrepair";
+
 function cleanJsonText(text = "") {
   let cleaned = text
     .trim()
@@ -13,6 +15,15 @@ function cleanJsonText(text = "") {
   }
 
   return cleaned;
+}
+
+function parseOrRepairJson(text) {
+  const cleaned = cleanJsonText(text);
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    return JSON.parse(cleanJsonText(jsonrepair(cleaned)));
+  }
 }
 
 export default async function handler(req, res) {
@@ -54,8 +65,7 @@ Return ONLY the complete updated itinerary as valid JSON — same compressed sch
     if (!response.ok) return res.status(response.status).json({ error: data.error?.message });
 
     const text = data.choices?.[0]?.message?.content || "";
-    const clean = cleanJsonText(text);
-    const refined = JSON.parse(clean);
+    const refined = parseOrRepairJson(text);
     return res.status(200).json({ trip: refined });
 
   } catch (err) {
