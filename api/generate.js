@@ -1,8 +1,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // SIDE QUEST — ADAPTIVE TWO-STAGE PIPELINE (COMPRESSED)
-// Stage 1: Haiku + web search → structured intelligence JSON
-// Stage 2: Sonnet composition → compressed premium itinerary JSON
-// Fallback: Sonnet + 1 targeted search when confidence is LOW
+// Stage 1: DeepSeek Flash → structured intelligence JSON
+// Stage 2: DeepSeek Pro → compressed premium itinerary JSON
+// Fallback: DeepSeek Flash → targeted intelligence patch when confidence is LOW
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── CONFIDENCE SCORING ──────────────────────────────────────────────────────
@@ -85,10 +85,12 @@ function buildFallbackQuery(destination, weakAreas) {
 
 // ── STAGE 1 ──────────────────────────────────────────────────────────────────
 const STAGE1_SYSTEM = `You are a compact travel intelligence extractor.
-MAX 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks.
+Return ONLY valid JSON — no prose, no markdown, no backticks.
 Every insight must be named and specific. No generic advice.
 
-SOURCE BIAS: Prioritize Reddit travel communities, long-form travel blogs, and local forum threads. Deprioritize generic aggregator listicles and SEO "top 10" pages unless they cite specific named venues with evidence.`;
+SOURCE BIAS: Prioritize the kind of intelligence found in Reddit travel communities, long-form travel blogs, and local forum threads. Deprioritize generic aggregator listicles and SEO "top 10" advice.
+
+DEEPSEEK-ONLY MODE: You do not have live web search here. Use best-known travel intelligence, but do not pretend certainty about current prices, closures, or exact operating schedules. Still be as specific and practical as possible.`;
 
 function buildStage1Prompt(form) {
   const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
@@ -99,10 +101,53 @@ function buildStage1Prompt(form) {
 Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
 Preferences: ${form.preferences}${safety}
 
-3 searches: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings
+Research angles to infer: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings
 
 Return ONLY JSON:
 {"season_notes":"specific to this destination in ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order"],"transport_notes":"specific advice","seasonal_warnings":["specific to ${month}"],"local_timing":"daily rhythms specific to destination"}`;
+}
+
+// ── DEEPSEEK CLIENT ───────────────────────────────────────────────────────────
+const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
+const DEEPSEEK_STAGE1_MODEL = process.env.DEEPSEEK_STAGE1_MODEL || "deepseek-v4-flash";
+const DEEPSEEK_STAGE2_MODEL = process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-pro";
+const DEEPSEEK_FALLBACK_MODEL = process.env.DEEPSEEK_FALLBACK_MODEL || DEEPSEEK_STAGE1_MODEL;
+
+function cleanJsonText(text = "") {
+  return text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+}
+
+async function callDeepSeekJSON({ model, system, user, maxTokens }) {
+  const response = await fetch(DEEPSEEK_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: user },
+      ],
+      response_format: { type: "json_object" },
+      max_tokens: maxTokens,
+      stream: false,
+    }),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error?.message || `DeepSeek API error (${response.status})`);
+  }
+
+  const content = data.choices?.[0]?.message?.content || "";
+  if (!content.trim()) throw new Error("DeepSeek returned an empty response");
+
+  return {
+    text: cleanJsonText(content),
+    usage: data.usage || {},
+  };
 }
 
 // ── STAGE 2 ──────────────────────────────────────────────────────────────────
@@ -225,33 +270,21 @@ export default async function handler(req, res) {
 
   const { form } = req.body;
   if (!form || !form.destinations) return res.status(400).json({ error: "Missing form data" });
-
-  const headers = {
-    "Content-Type": "application/json",
-    "x-api-key": process.env.ANTHROPIC_API_KEY,
-    "anthropic-version": "2023-06-01",
-  };
+  if (!process.env.DEEPSEEK_API_KEY) return res.status(500).json({ error: "Missing DEEPSEEK_API_KEY" });
 
   try {
-    // ── STAGE 1: Haiku research ───────────────────────────────────────────────
-    console.log(`[S1] Starting: ${form.destinations}`);
-    const s1 = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers,
-      body: JSON.stringify({
-        model: "claude-haiku-4-5", max_tokens: 1200,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
-        system: STAGE1_SYSTEM,
-        messages: [{ role: "user", content: buildStage1Prompt(form) }],
-      }),
+    // ── STAGE 1: DeepSeek intelligence extraction ─────────────────────────────
+    console.log(`[S1] Starting: ${form.destinations} via ${DEEPSEEK_STAGE1_MODEL}`);
+    const s1 = await callDeepSeekJSON({
+      model: DEEPSEEK_STAGE1_MODEL,
+      system: STAGE1_SYSTEM,
+      user: buildStage1Prompt(form),
+      maxTokens: 1600,
     });
-    const s1Data = await s1.json();
-    console.log(`[S1] tokens: in:${s1Data.usage?.input_tokens} out:${s1Data.usage?.output_tokens}`);
+    console.log(`[S1] tokens: in:${s1.usage?.prompt_tokens} out:${s1.usage?.completion_tokens}`);
 
     let intelligence = {};
-    if (s1Data.content) {
-      const txt = s1Data.content.filter(b => b.type === "text").map(b => b.text).join("");
-      try { intelligence = JSON.parse(txt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim()); } catch {}
-    }
+    try { intelligence = JSON.parse(s1.text); } catch {}
 
     // ── CONFIDENCE EVALUATION ─────────────────────────────────────────────────
     const conf = scoreIntelligence(intelligence);
@@ -260,61 +293,50 @@ export default async function handler(req, res) {
     // ── ADAPTIVE FALLBACK ─────────────────────────────────────────────────────
     if (conf.grade === "low") {
       const fbQuery = buildFallbackQuery(form.destinations, conf.weakAreas);
-      console.log(`[Fallback] triggered. query: "${fbQuery}"`);
-      const fb = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST", headers,
-        body: JSON.stringify({
-          model: "claude-sonnet-4-5", max_tokens: 700,
-          tools: [{ type: "web_search_20250305", name: "web_search" }],
-          system: `Run ONE targeted web search. Return compact JSON only — no prose.`,
-          messages: [{ role: "user", content: `Search: "${fbQuery}"\n\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}` }],
-        }),
+      console.log(`[Fallback] triggered. focus: "${fbQuery}"`);
+      const fb = await callDeepSeekJSON({
+        model: DEEPSEEK_FALLBACK_MODEL,
+        maxTokens: 900,
+        system: `Return compact JSON only — no prose. Use best-known travel intelligence; do not claim live search or current certainty.`,
+        user: `Focus: "${fbQuery}"\n\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}`,
       });
-      const fbData = await fb.json();
-      console.log(`[Fallback] tokens: in:${fbData.usage?.input_tokens} out:${fbData.usage?.output_tokens}`);
-      if (fbData.content) {
-        const fbTxt = fbData.content.filter(b => b.type === "text").map(b => b.text).join("");
-        try {
-          const fbI = JSON.parse(fbTxt.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim());
-          if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems||[]), ...fbI.hidden_gems].slice(0,6);
-          if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks||[]), ...fbI.hacks].slice(0,5);
-          if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas||[]), ...fbI.stay_areas.map(s=>({name:s,why:"local rec",avoid_if:""}))].slice(0,4);
-          if (fbI.food?.length) intelligence.food_spots = [...(intelligence.food_spots||[]), ...fbI.food].slice(0,5);
-          if (fbI.insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbI.insights].filter(Boolean).join(" | ");
-          console.log("[Fallback] intelligence merged");
-        } catch { console.log("[Fallback] parse failed, using original"); }
-      }
+      console.log(`[Fallback] tokens: in:${fb.usage?.prompt_tokens} out:${fb.usage?.completion_tokens}`);
+      try {
+        const fbI = JSON.parse(fb.text);
+        if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems||[]), ...fbI.hidden_gems].slice(0,6);
+        if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks||[]), ...fbI.hacks].slice(0,5);
+        if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas||[]), ...fbI.stay_areas.map(s=>({name:s,why:"local rec",avoid_if:""}))].slice(0,4);
+        if (fbI.food?.length) intelligence.food_spots = [...(intelligence.food_spots||[]), ...fbI.food].slice(0,5);
+        if (fbI.insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbI.insights].filter(Boolean).join(" | ");
+        console.log("[Fallback] intelligence merged");
+      } catch { console.log("[Fallback] parse failed, using original"); }
     }
 
-    // ── STAGE 2: Sonnet composition ───────────────────────────────────────────
-    console.log(`[S2] Composing (fallback:${conf.grade==="low"})`);
-    const s2 = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST", headers,
-      body: JSON.stringify({
-        model: "claude-sonnet-4-5",
-        max_tokens: 8000,
-        system: STAGE2_SYSTEM,
-        messages: [{ role: "user", content: buildStage2Prompt(form, intelligence, conf) }],
-      }),
+    // ── STAGE 2: DeepSeek composition ─────────────────────────────────────────
+    console.log(`[S2] Composing via ${DEEPSEEK_STAGE2_MODEL} (fallback:${conf.grade==="low"})`);
+    const s2 = await callDeepSeekJSON({
+      model: DEEPSEEK_STAGE2_MODEL,
+      maxTokens: 8000,
+      system: STAGE2_SYSTEM,
+      user: buildStage2Prompt(form, intelligence, conf),
     });
 
-    const s2Data = await s2.json();
-    if (!s2.ok) return res.status(s2.status).json({ error: s2Data.error?.message || "Composition error" });
-
     // Validate JSON completeness
-    const rawText = (s2Data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-    const cleaned = rawText.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
-    console.log(`[S2] tokens: in:${s2Data.usage?.input_tokens} out:${s2Data.usage?.output_tokens} | raw_chars:${rawText.length}`);
+    const cleaned = s2.text;
+    console.log(`[S2] tokens: in:${s2.usage?.prompt_tokens} out:${s2.usage?.completion_tokens} | raw_chars:${cleaned.length}`);
 
     try {
       JSON.parse(cleaned);
     } catch(e) {
       console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
-      return res.status(500).json({ error: "Output truncated. Try a shorter trip or fewer days." });
+      return res.status(500).json({ error: "Output was not valid JSON. Try a shorter trip or fewer days." });
     }
 
-    console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2Data.usage?.output_tokens}tok`);
-    return res.status(200).json(s2Data);
+    console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2.usage?.completion_tokens}tok`);
+    return res.status(200).json({
+      content: [{ type: "text", text: cleaned }],
+      usage: s2.usage,
+    });
 
   } catch (err) {
     console.error("[Error]", err);
