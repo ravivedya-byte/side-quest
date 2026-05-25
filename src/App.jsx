@@ -1297,14 +1297,22 @@ export default function SideQuest() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ form: buildFormPayload(form) }),
       });
-      const data = await res.json();
+      const body = await res.text();
+      let data;
+      try {
+        data = JSON.parse(body);
+      } catch {
+        throw new Error(`Server returned a non-JSON response (${res.status}). Check the latest Vercel function logs.`);
+      }
       if (data.error) throw new Error(data.error);
-      const raw = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-      const jsonStr = raw.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
-      const parsed = JSON.parse(jsonStr);
+      const parsed = data.trip || (() => {
+        const raw = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
+        const jsonStr = raw.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
+        return JSON.parse(jsonStr);
+      })();
       setTrip(parsed); setPhase("result"); window.scrollTo(0,0);
     } catch(e) {
-      const msg = e instanceof SyntaxError ? "Response wasn't valid JSON. Try again." : "Something went wrong — "+e.message;
+      const msg = e instanceof SyntaxError ? "Itinerary response was not valid JSON after server repair. Try a shorter trip or fewer days." : "Something went wrong — "+e.message;
       setErr(msg); setPhase("form");
     }
   };

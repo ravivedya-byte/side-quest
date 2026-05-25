@@ -378,8 +378,10 @@ export default async function handler(req, res) {
     let cleaned = s2.text;
     console.log(`[S2] tokens: in:${s2.usage?.prompt_tokens} out:${s2.usage?.completion_tokens} | raw_chars:${cleaned.length}`);
 
+    let parsedTrip;
     try {
       const parsed = parseOrRepairJson(cleaned, "Stage 2 itinerary");
+      parsedTrip = parsed.json;
       cleaned = parsed.text;
       if (parsed.repaired) console.log("[S2] jsonrepair fixed itinerary JSON");
     } catch(e) {
@@ -391,7 +393,9 @@ export default async function handler(req, res) {
           parseError: e.message,
           context: `${form.destinations} itinerary output`,
         });
-        cleaned = parseOrRepairJson(cleaned, "Stage 2 repaired itinerary").text;
+        const parsed = parseOrRepairJson(cleaned, "Stage 2 repaired itinerary");
+        parsedTrip = parsed.json;
+        cleaned = parsed.text;
         console.log("[S2 Repair] JSON repaired successfully");
       } catch (repairErr) {
         console.error(`[S2 Repair Error] ${repairErr.message} | preview: ${cleaned.slice(0,400)}`);
@@ -401,6 +405,7 @@ export default async function handler(req, res) {
 
     console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2.usage?.completion_tokens}tok`);
     return res.status(200).json({
+      trip: parsedTrip,
       content: [{ type: "text", text: cleaned }],
       usage: s2.usage,
     });
