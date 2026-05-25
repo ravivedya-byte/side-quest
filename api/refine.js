@@ -1,3 +1,20 @@
+function cleanJsonText(text = "") {
+  let cleaned = text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return cleaned;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -16,7 +33,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: process.env.DEEPSEEK_REFINE_MODEL || "deepseek-v4-flash",
-        max_tokens: 6000,
+        max_tokens: 10000,
         response_format: { type: "json_object" },
         stream: false,
         messages: [{
@@ -37,7 +54,7 @@ Return ONLY the complete updated itinerary as valid JSON — same compressed sch
     if (!response.ok) return res.status(response.status).json({ error: data.error?.message });
 
     const text = data.choices?.[0]?.message?.content || "";
-    const clean = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+    const clean = cleanJsonText(text);
     const refined = JSON.parse(clean);
     return res.status(200).json({ trip: refined });
 

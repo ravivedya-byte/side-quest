@@ -114,7 +114,35 @@ const DEEPSEEK_STAGE2_MODEL = process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-
 const DEEPSEEK_FALLBACK_MODEL = process.env.DEEPSEEK_FALLBACK_MODEL || DEEPSEEK_STAGE1_MODEL;
 
 function cleanJsonText(text = "") {
-  return text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+  let cleaned = text
+    .trim()
+    .replace(/^```json\s*/i, "")
+    .replace(/^```\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim();
+
+  const firstBrace = cleaned.indexOf("{");
+  const lastBrace = cleaned.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1).trim();
+  }
+
+  return cleaned;
+}
+
+async function repairJSON({ rawText, parseError, context }) {
+  const repair = await callDeepSeekJSON({
+    model: DEEPSEEK_FALLBACK_MODEL,
+    maxTokens: 16000,
+    system: `You repair malformed JSON. Return ONLY one valid JSON object. No markdown, no comments, no explanation. Preserve all itinerary content and schema fields; only fix syntax, escaping, missing commas/brackets, and invalid JSON wrappers.`,
+    user: `Context: ${context}
+Parse error: ${parseError}
+
+Malformed JSON/text:
+${rawText}`,
+  });
+
+  return repair.text;
 }
 
 async function callDeepSeekJSON({ model, system, user, maxTokens }) {
@@ -316,20 +344,32 @@ export default async function handler(req, res) {
     console.log(`[S2] Composing via ${DEEPSEEK_STAGE2_MODEL} (fallback:${conf.grade==="low"})`);
     const s2 = await callDeepSeekJSON({
       model: DEEPSEEK_STAGE2_MODEL,
-      maxTokens: 8000,
+      maxTokens: 16000,
       system: STAGE2_SYSTEM,
       user: buildStage2Prompt(form, intelligence, conf),
     });
 
     // Validate JSON completeness
-    const cleaned = s2.text;
+    let cleaned = s2.text;
     console.log(`[S2] tokens: in:${s2.usage?.prompt_tokens} out:${s2.usage?.completion_tokens} | raw_chars:${cleaned.length}`);
 
     try {
       JSON.parse(cleaned);
     } catch(e) {
       console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
-      return res.status(500).json({ error: "Output was not valid JSON. Try a shorter trip or fewer days." });
+      try {
+        console.log("[S2 Repair] Attempting DeepSeek JSON repair");
+        cleaned = await repairJSON({
+          rawText: cleaned,
+          parseError: e.message,
+          context: `${form.destinations} itinerary output`,
+        });
+        JSON.parse(cleaned);
+        console.log("[S2 Repair] JSON repaired successfully");
+      } catch (repairErr) {
+        console.error(`[S2 Repair Error] ${repairErr.message} | preview: ${cleaned.slice(0,400)}`);
+        return res.status(500).json({ error: "Output was not valid JSON after repair. Try a shorter trip or fewer days." });
+      }
     }
 
     console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2.usage?.completion_tokens}tok`);
