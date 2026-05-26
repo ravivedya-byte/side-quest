@@ -105,14 +105,14 @@ const FACTS = [
 ];
 
 const RMSGS = [
-  "Inferring forum-style local recommendations…",
+  "Building the route-level blueprint…",
+  "Splitting the trip into detailed day sections…",
   "Cross-referencing crowd-free timings…",
-  "Finding the spots tourists haven't discovered yet…",
   "Comparing neighbourhoods by vibe, not star rating…",
-  "Weighing old forum-style travel wisdom…",
+  "Threading recovery time through the route…",
   "Filtering out the tourist menu…",
-  "Checking which spots are empty at which hour…",
-  "Composing your blueprint…",
+  "Composing food and stay recommendations…",
+  "Assembling your full itinerary…",
 ];
 
 function CompassStar({ size = 28, color = T.accent }) {

@@ -1,120 +1,15 @@
 import { jsonrepair } from "jsonrepair";
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SIDE QUEST — SINGLE-STAGE DEEPSEEK PIPELINE (COMPRESSED)
-// DeepSeek composes the itinerary directly; deterministic JSON repair handles
-// occasional malformed output without extra model calls.
-// ═══════════════════════════════════════════════════════════════════════════
+// SIDE QUEST - CHUNKED DEEPSEEK PIPELINE
+// Blueprint first, then bounded day-section calls in parallel. This keeps long
+// trips detailed without asking one model response to carry the entire itinerary.
 
-// ── CONFIDENCE SCORING ──────────────────────────────────────────────────────
-function scoreIntelligence(intel) {
-  if (!intel || typeof intel !== "object" || Object.keys(intel).length < 3) {
-    return { score: 0, maxScore: 15, confidence: 0, grade: "low", weakAreas: ["empty_response"], log: "Stage 1 empty" };
-  }
-  let score = 0;
-  const weakAreas = [];
-  const log = [];
-
-  const gems = Array.isArray(intel.hidden_gems) ? intel.hidden_gems : [];
-  const specificGems = gems.filter(g => typeof g === "string" && (g.includes("—") || g.includes(" - ") || g.length > 35));
-  score += Math.min(specificGems.length, 3);
-  if (specificGems.length < 2) { weakAreas.push("hidden_gems"); log.push(`gems:${specificGems.length}`); } else log.push(`gems:${specificGems.length}✓`);
-
-  const hacks = Array.isArray(intel.crowd_hacks) ? intel.crowd_hacks : [];
-  const timedHacks = hacks.filter(h => typeof h === "string" && /\b\d{1,2}(:\d{2})?\s*(am|pm|AM|PM)|before \d|after \d|\d:\d{2}/i.test(h));
-  score += Math.min(timedHacks.length * 1.5, 3);
-  if (timedHacks.length === 0) { weakAreas.push("crowd_hacks"); log.push("hacks:no_timings"); } else log.push(`hacks:${timedHacks.length}✓`);
-
-  const stays = Array.isArray(intel.best_stay_areas) ? intel.best_stay_areas : [];
-  const richStays = stays.filter(s => s && typeof s.why === "string" && s.why.length > 15 && s.name);
-  score += Math.min(richStays.length, 2);
-  if (richStays.length < 1) { weakAreas.push("stay_areas"); log.push("stays:weak"); } else log.push(`stays:${richStays.length}✓`);
-
-  const food = Array.isArray(intel.food_spots) ? intel.food_spots : [];
-  const namedFood = food.filter(f => typeof f === "string" && f.length > 20 && (f.includes("—") || f.includes("-") || /[A-Z]/.test(f.slice(1))));
-  score += Math.min(namedFood.length, 2);
-  if (namedFood.length < 1) { weakAreas.push("food_spots"); log.push("food:generic"); } else log.push(`food:${namedFood.length}✓`);
-
-  const traps = Array.isArray(intel.tourist_traps) ? intel.tourist_traps : [];
-  score += traps.filter(t => typeof t === "string" && t.length > 15).length > 0 ? 1 : 0;
-  if (traps.length === 0) { weakAreas.push("tourist_traps"); log.push("traps:none"); } else log.push("traps✓");
-
-  const seasonNotes = intel.season_notes || "";
-  score += seasonNotes.length > 30 && !/weather can be|unpredictable|varies by/i.test(seasonNotes) ? 1 : 0;
-  if (seasonNotes.length < 30) { weakAreas.push("seasonality"); log.push("season:shallow"); } else log.push("season✓");
-
-  const timing = intel.local_timing || "";
-  score += timing.length > 25 ? 1 : 0;
-  if (timing.length < 25) { weakAreas.push("local_timing"); log.push("timing:thin"); } else log.push("timing✓");
-
-  const transport = intel.transport_notes || "";
-  score += transport.length > 20 && !/use public transport|take a taxi|rent a car/i.test(transport) ? 1 : 0;
-
-  const warnings = Array.isArray(intel.seasonal_warnings) ? intel.seasonal_warnings : [];
-  score += warnings.filter(w => typeof w === "string" && w.length > 15).length > 0 ? 1 : 0;
-
-  const allText = JSON.stringify(intel).toLowerCase();
-  const genericPhrases = ["local cuisine", "popular spots", "beautiful scenery", "worth visiting", "must see", "check it out", "great place", "good food", "amazing views", "nice area", "worth a visit", "don't miss"];
-  const penalty = genericPhrases.filter(p => allText.includes(p)).length * 0.4;
-  score -= penalty;
-  if (penalty > 0.8) { weakAreas.push("generic_language"); log.push(`generic:-${penalty.toFixed(1)}`); }
-
-  const properBonus = Math.min(((allText.match(/\b[A-Z][a-z]{2,}\b/g) || []).length > 15 ? 1 : 0.5), 1);
-  score += properBonus;
-
-  const finalScore = Math.max(0, score);
-  const maxScore = 15;
-  const confidence = finalScore / maxScore;
-  return { score: parseFloat(finalScore.toFixed(2)), maxScore, confidence: parseFloat(confidence.toFixed(3)), grade: confidence >= 0.60 ? "high" : confidence >= 0.38 ? "medium" : "low", weakAreas, log: log.join(" | ") };
-}
-
-function buildFallbackQuery(destination, weakAreas) {
-  const map = {
-    hidden_gems: `hidden gems off beaten path ${destination} locals recommend forum`,
-    crowd_hacks: `${destination} best time visit avoid tourist crowds exact timing`,
-    stay_areas: `${destination} best neighbourhood stay local advice forum`,
-    food_spots: `${destination} authentic local food where locals eat named places`,
-    tourist_traps: `${destination} tourist traps scams to avoid`,
-    seasonality: `${destination} seasonal conditions what to expect`,
-    local_timing: `${destination} local life rhythm daily schedule tips`,
-    generic_language: `${destination} specific insider travel tips beyond typical`,
-  };
-  const priority = ["crowd_hacks", "hidden_gems", "stay_areas", "food_spots", "generic_language", "tourist_traps", "seasonality", "local_timing"];
-  const top = priority.find(a => weakAreas.includes(a));
-  return map[top] || `${destination} insider travel tips locals forum`;
-}
-
-// ── STAGE 1 ──────────────────────────────────────────────────────────────────
-const STAGE1_SYSTEM = `You are a compact travel intelligence extractor.
-Return ONLY valid JSON — no prose, no markdown, no backticks.
-Every insight must be named and specific. No generic advice.
-
-SOURCE BIAS: Prioritize the kind of intelligence found in Reddit travel communities, long-form travel blogs, and local forum threads. Deprioritize generic aggregator listicles and SEO "top 10" advice.
-
-DEEPSEEK-ONLY MODE: You do not have live web search here. Use best-known travel intelligence, but do not pretend certainty about current prices, closures, or exact operating schedules. Still be as specific and practical as possible.
-
-FOOD + ACTIVITY DEPTH: Put extra effort into named restaurants, dishes, cafes, market stalls, homestay meals, and lesser-known activities that forum-style travellers would discuss.`;
-
-function buildStage1Prompt(form) {
-  const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
-  const safety = form.prioritizeWomensSafety
-    ? "\nWomen's safety prioritized in this trip — when sources discuss solo/women traveller experience, neighbourhoods, or timing, fold that into stay areas, transport_notes, seasonal_warnings, and crowd_hacks where relevant. Stay factual, not alarmist."
-    : "";
-  return `Extract travel intelligence: ${form.destinations} from ${form.departure}
-Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
-Preferences: ${form.preferences}${safety}
-
-Research angles to infer: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings (4) restaurant/cafe variety (5) lesser-known things to do
-
-Return ONLY JSON:
-{"season_notes":"specific to this destination in ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order"],"transport_notes":"specific advice","seasonal_warnings":["specific to ${month}"],"local_timing":"daily rhythms specific to destination"}`;
-}
-
-// ── DEEPSEEK CLIENT ───────────────────────────────────────────────────────────
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_STAGE1_MODEL = process.env.DEEPSEEK_STAGE1_MODEL || "deepseek-v4-flash";
-const DEEPSEEK_STAGE2_MODEL = process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
-const DEEPSEEK_FALLBACK_MODEL = process.env.DEEPSEEK_FALLBACK_MODEL || DEEPSEEK_STAGE1_MODEL;
+const DEEPSEEK_BLUEPRINT_MODEL = process.env.DEEPSEEK_BLUEPRINT_MODEL || process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
+const DEEPSEEK_SECTION_MODEL = process.env.DEEPSEEK_SECTION_MODEL || process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
+const CALL_TIMEOUT_MS = 95000;
+const MAX_SUPPORTED_DAYS = 14;
+const CHUNK_SIZE = 3;
 
 function cleanJsonText(text = "") {
   let cleaned = text
@@ -148,9 +43,10 @@ function parseOrRepairJson(text, label) {
   }
 }
 
-async function callDeepSeekJSON({ model, system, user, maxTokens }) {
+async function callDeepSeekJSON({ model, system, user, maxTokens, label }) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 240000);
+  const timeout = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
+
   const response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
     signal: controller.signal,
@@ -176,7 +72,7 @@ async function callDeepSeekJSON({ model, system, user, maxTokens }) {
   }
 
   const content = data.choices?.[0]?.message?.content || "";
-  if (!content.trim()) throw new Error("DeepSeek returned an empty response");
+  if (!content.trim()) throw new Error(`${label || "DeepSeek"} returned an empty response`);
 
   return {
     text: cleanJsonText(content),
@@ -184,122 +80,224 @@ async function callDeepSeekJSON({ model, system, user, maxTokens }) {
   };
 }
 
-// ── STAGE 2 ──────────────────────────────────────────────────────────────────
-const STAGE2_SYSTEM = `You are Side Quest — conscious travel blueprint creator for a real operator.
+function parseDateOnly(value) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
 
-BRAND (non-negotiable):
-(1) HELD & LOW-STRESS: Clear transitions, realistic timing, no "hero" marathon days. Guests should feel psychologically held — predictable where it matters, honest about effort.
-(2) DEPTH: Genuine depth — craft, ritual, quiet observation, meaningful local encounter — not checklist sightseeing or photo-only stops.
-(3) PACE WITH RECOVERY: After an intense morning block, include a real RECOVERY window (rest, slow walk, café, hotel downtime) as one timeline row with "type":"recovery" and a clear time range.
+function getTripDayCount(form) {
+  const from = parseDateOnly(form.dateFrom);
+  const to = parseDateOnly(form.dateTo);
+  if (from && to && to >= from) {
+    const diff = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
+    return Math.min(Math.max(diff, 1), MAX_SUPPORTED_DAYS);
+  }
 
-AUDIENCE: Educated, curious; authenticity over comfort; not budget backpacker, not luxury tourist. They want to feel they went somewhere real.
+  const text = `${form.destinations || ""} ${form.preferences || ""}`;
+  const match = text.match(/\b(\d{1,2})\s*(day|days|night|nights)\b/i);
+  if (match) {
+    const days = Number(match[1]) + (match[2].toLowerCase().startsWith("night") ? 1 : 0);
+    return Math.min(Math.max(days, 1), MAX_SUPPORTED_DAYS);
+  }
 
-Tone: editorial, insider, specific, emotionally intelligent. Globally adapted — mirror destination culture (not one-country template).
-Output ONLY valid JSON. No markdown, no backticks, no preamble.
+  return 5;
+}
 
-PACE & ACTIVITIES:
-- Maximum 3 "major" activities per calendar day (highlight-level or long immersive blocks). Food-only stops, short transits, and "recovery" rows do NOT count toward this cap.
-- No rules for minimum or maximum nights per place — ignore night-count pacing rules.
+function buildChunks(dayCount) {
+  const chunks = [];
+  for (let start = 1; start <= dayCount; start += CHUNK_SIZE) {
+    const end = Math.min(start + CHUNK_SIZE - 1, dayCount);
+    chunks.push({
+      start,
+      end,
+      days: Array.from({ length: end - start + 1 }, (_, i) => start + i),
+    });
+  }
+  return chunks;
+}
 
-MUST-DO COVERAGE — PER DISTINCT PLACE (each major stop / city on the route):
-- Across all days spent in that place, include at least 3 timeline entries total with "mustDo": true.
-- Spread across types where the destination allows: (a) early / pre-crowd, (b) local cultural immersion (not a tourist show), (c) slow quiet moment suited to reflection, (d) offbeat angle many tourists miss.
+function compactBlueprintForPrompt(blueprint) {
+  return {
+    tripTitle: blueprint.tripTitle,
+    overview: blueprint.overview,
+    routePlan: blueprint.routePlan,
+    foodMap: blueprint.foodMap,
+    generationNotes: blueprint.generationNotes,
+  };
+}
 
-SUNSET (keep engineering + your intent):
-- Same geographic anchor rules as before: one sunset row, 25–30 min before actual sunset, afternoon routes drift toward it after 3 PM, no zigzag commuting.
-- Prefer quieter, scenic sunset spots over mob viewpoints when possible; in that row's desc, one short phrase on why this spot over the obvious one (within word limit).
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-STAY & TRANSPORT BIAS:
-- Prefer homestays, family-run guesthouses, and small independents over big branded hotels when compatible with budget and availability.
-- Prefer public transport, shared transit, walking, and local cycling/scooter exploration when sensible — unless user preferences forbid.
+function normaliseDay(day, fallbackNumber) {
+  return {
+    dayNumber: Number(day?.dayNumber) || fallbackNumber,
+    place: day?.place || "Route stop",
+    title: day?.title || "A grounded day",
+    subtitle: day?.subtitle || "A steady rhythm of movement, depth, and recovery.",
+    timeline: asArray(day?.timeline).map((item) => ({
+      time: item?.time || "",
+      title: item?.title || "Planned moment",
+      desc: item?.desc || "",
+      type: item?.type || "highlight",
+      mustDo: Boolean(item?.mustDo),
+    })),
+    food: asArray(day?.food),
+    stay: day?.stay || { locality: "", why: "", notWhere: "" },
+    tips: asArray(day?.tips),
+    hacks: asArray(day?.hacks),
+    warnings: asArray(day?.warnings),
+    budget: day?.budget || "",
+  };
+}
 
-TRIP ARC (overall journey, not per place): Early segment: arrival and decompression. Middle: depth and immersion. Before return: integration and quieter pacing — reflect in day subtitles and philosophy where natural.
+function ensureFoodMap(blueprint, days) {
+  const existing = asArray(blueprint.foodMap).filter((group) => group?.place);
+  if (existing.length) return existing;
 
-OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
-- philosophy: max 45 words
-- tagline: max 18 words
-- memories[]: max 18 words each
-- moodTags: max 5 tags, 1-3 words each
-- timeline[].desc: max 28 words — no cinematic filler (sunset row: squeeze "why this spot" into this limit)
-- tips[]: max 20 words each
-- hacks[]: max 16 words each, must include exact timing
-- warnings[]: max 15 words each
-- stay.why: max 30 words
-- stay.notWhere: ONE sentence, max 24 words, direct comparison
-- differentiators[]: max 30 words each, specific and opinionated
-- packing[]: max 12 words each
-- food[]: max 20 words each — named place + dish + why
-- foodMap[].spots[]: max 3-5 spots per place; each spot can be richer than daily food but must remain practical
+  const places = [...new Set(days.map((day) => day.place).filter(Boolean))];
+  return places.map((place) => ({
+    place,
+    spots: [],
+  }));
+}
 
-FOOD: Every day needs 2-3 named food spots with specific dishes. Not "try local cuisine."
-FOOD MAP: Add a separate foodMap grouped by place. Each major place gets 3-5 named restaurants/cafes/stalls with what to order, bestFor, and why. Avoid repeating the same restaurant across multiple days unless it truly earns repeat visits.
+function assembleTrip({ blueprint, dayChunks, dayCount }) {
+  const generatedDays = dayChunks
+    .flatMap((chunk) => asArray(chunk.days))
+    .sort((a, b) => (Number(a.dayNumber) || 0) - (Number(b.dayNumber) || 0))
+    .slice(0, dayCount);
+  const days = Array.from({ length: dayCount }, (_, index) => {
+    const dayNumber = index + 1;
+    const matchingDay = generatedDays.find((day) => Number(day?.dayNumber) === dayNumber);
+    return normaliseDay(matchingDay, dayNumber);
+  });
 
-GEOGRAPHIC FLOW — MANDATORY: Every day has exactly two non-negotiable anchors scheduled first:
-ANCHOR 1 — SUNSET: (as above)
-ANCHOR 2 — TOP TIME-SENSITIVE ACTIVITY: The one activity most dependent on a specific time window (temple before 8:30 AM, waterfall at dawn, market at sunrise). Lock it at its optimal time.
-Build all other activities as a continuous geographic arc connecting these two anchors. Route curves — never zigzags.
+  return {
+    tripTitle: blueprint.tripTitle || "Side Quest Itinerary",
+    tagline: blueprint.tagline || "A slower, deeper route built around presence.",
+    travelStyle: blueprint.travelStyle || "Conscious travel",
+    moodTags: asArray(blueprint.moodTags).slice(0, 5),
+    philosophy: blueprint.philosophy || "",
+    memories: asArray(blueprint.memories).slice(0, 5),
+    overview: blueprint.overview || {
+      routeStops: [...new Set(days.map((day) => day.place).filter(Boolean))],
+      duration: `${dayCount} days`,
+      transport: "",
+      totalBudget: "",
+      season: "",
+    },
+    days,
+    foodMap: ensureFoodMap(blueprint, days),
+    costs: blueprint.costs || {},
+    differentiators: asArray(blueprint.differentiators),
+    packing: asArray(blueprint.packing),
+  };
+}
 
-DO NOT: repeat emotional framing, over-explain obvious places, write filler prose, duplicate info
-PREFER: specificity over length — "Arrive before 7 AM" beats "Golden sunlight spills across..."
-The timeline structure creates pacing — let timestamps do structural work, not prose.`;
+const BRAND_SYSTEM = `You are Side Quest, a conscious travel blueprint creator for a real operator.
 
-function buildStage2Prompt(form, intelligence, conf) {
+BRAND:
+(1) Held and low-stress: clear transitions, realistic timing, psychologically safe pacing.
+(2) Depth: craft, ritual, nature, quiet observation, meaningful local encounter; not checklist sightseeing.
+(3) Recovery: after intense mornings, include real recovery time.
+
+STYLE: editorial, specific, practical, globally adapted. Use best-known travel knowledge and forum-style judgement, but do not pretend to have live web search or current certainty about closures/prices.
+
+RULES:
+- Prefer quieter, authentic, locally grounded experiences over generic tourist hits.
+- Prefer homestays, family-run guesthouses, small independents, public/shared/local transport where sensible.
+- Infer currency from budget text and use it consistently.
+- If women's safety is prioritized, bias toward reputable areas, sensible arrival times, and practical non-alarmist warnings.
+- Return ONLY valid JSON. No markdown, no backticks, no prose outside JSON.`;
+
+function buildTripContext(form, dayCount) {
   const dateStr = form.dateFrom && form.dateTo ? `${form.dateFrom} to ${form.dateTo}` : form.dateFrom || "flexible";
-  const isTransportSuggested = form.travelMode === "Suggested";
-  const transportNote = isTransportSuggested
-    ? `TRANSPORT: Evaluate the best way to reach ${form.destinations} from ${form.departure}. Consider night buses, overnight trains, direct flights. Recommend ONE specific option with departure time, arrival time, and cost. Optimise Day 1 timeline around actual arrival time.`
-    : `TRANSPORT: ${form.travelMode}`;
-  const qualityNote = conf.grade === "low"
-    ? `Intelligence sparse — compensate with strong pacing and cultural nuance. Weak areas: ${conf.weakAreas.join(", ")}.`
-    : conf.grade === "medium"
-    ? `Be especially specific in: ${conf.weakAreas.join(", ")}.`
-    : "";
+  const transport = form.travelMode === "Suggested"
+    ? `Suggest the best transport from ${form.departure}, including rough timing and cost.`
+    : form.travelMode;
+  return `Trip: ${dayCount} days in ${form.destinations} from ${form.departure}
+Dates: ${dateStr}
+People: ${form.people}
+Budget: ${form.budget} per person
+Transport: ${transport}
+Preferences: ${form.preferences || ""}
+Women's safety prioritized: ${form.prioritizeWomensSafety ? "yes" : "no"}`;
+}
 
-  const safetyNote = form.prioritizeWomensSafety
-    ? `WOMEN'S SAFETY: Prioritized for this trip — bias toward well-reviewed areas for women/solo travellers, sensible arrival times on long legs, reputable stays, and concise practical tips in warnings where useful. Never fearmonger or victim-blame.`
-    : "";
+function buildBlueprintPrompt(form, dayCount, chunks) {
+  return `${buildTripContext(form, dayCount)}
 
-  return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
-${JSON.stringify(intelligence)}
+Create the route-level blueprint only. Do NOT generate day timelines.
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.budget} per person
-${transportNote}
-Preferences: ${form.preferences}
-${safetyNote}
-${qualityNote}
+Day chunks that will be generated next: ${chunks.map((c) => `days ${c.start}-${c.end}`).join(", ")}.
 
-RULES: Conscious pace — respect max 3 major activities/day, mandatory recovery after intense mornings, Must-Do coverage per place, held-and-deep brand above. Sunset in timeline only (one sunset row per day). Specific locality + why for every stay. Use research intel — real places, real timings. Preferences shape the entire arc. Infer currency from the budget text and use that currency consistently for ALL monetary values.
-
-Return ONLY this compressed JSON (respect ALL word limits above):
+Return ONLY this JSON:
 {
-  "tripTitle":"title",
-  "tagline":"≤18 words",
-  "travelStyle":"style",
-  "moodTags":["≤5 tags"],
-  "philosophy":"≤45 words",
-  "memories":["≤18 words each — concrete sensory moment"],
-  "overview":{"routeStops":["Stop"],"duration":"X days","transport":"specific recommendation or mode","transportNote":"departure/arrival/cost if Suggested else omit","originalTransport":"${form.travelMode}","totalBudget":"X/person","season":"one line"},
-  "days":[{
-    "dayNumber":1,
-    "place":"actual city/town/village name",
-    "title":"evocative character title",
-    "subtitle":"narrative arc — morning, afternoon, evening",    
-    "timeline":[{"time":"5:30 AM","title":"activity","desc":"≤28 words","type":"highlight|travel|food|sunset|stay|tip|recovery","mustDo":false}],
-    "food":["Named Place — specific dish — context ≤20 words"],
-    "stay":{"locality":"name","why":"≤30 words","notWhere":"≤24 words — direct comparison"},
-    "tips":["≤20 words"],
-    "hacks":["≤16 words with exact timing"],
-    "warnings":["≤15 words"],
-    "budget":"X/person"
-  }],
-  "foodMap":[{"place":"actual place name","spots":[{"name":"Named Place","order":"specific dish/order","bestFor":"breakfast|lunch|dinner|coffee|snack|local meal","why":"specific reason this belongs"}]}],
+  "tripTitle":"specific title",
+  "tagline":"max 18 words",
+  "travelStyle":"short style label",
+  "moodTags":["max 5 short tags"],
+  "philosophy":"max 55 words",
+  "memories":["3-5 concrete sensory memories, max 16 words each"],
+  "overview":{
+    "routeStops":["ordered stop names"],
+    "duration":"${dayCount} days",
+    "transport":"specific recommendation or selected mode",
+    "transportNote":"departure/arrival/cost if transport is suggested, otherwise brief note",
+    "originalTransport":"${form.travelMode}",
+    "totalBudget":"budget/person",
+    "season":"one specific line"
+  },
+  "routePlan":[{"place":"actual stop","days":[1,2],"stay":{"locality":"name","why":"max 30 words","notWhere":"direct comparison max 24 words"},"arc":"what this stop contributes"}],
+  "foodMap":[{"place":"actual stop","spots":[{"name":"Named place","order":"specific dish/order","bestFor":"breakfast|lunch|dinner|coffee|snack|local meal","why":"max 14 words"}]}],
   "costs":{"transport":{"amount":"X","note":"brief"},"accommodation":{"amount":"X","note":"brief"},"food":{"amount":"X","note":"brief"},"activities":{"amount":"X","note":"brief"},"misc":{"amount":"X","note":"brief"},"total":"X/person"},
-  "differentiators":["≤30 words each — specific and opinionated"],
-  "packing":["≤12 words each"]
+  "differentiators":["4-6 specific points, max 26 words each"],
+  "packing":["5-8 specific items, max 12 words each"],
+  "generationNotes":["named hidden gems, crowd hacks, tourist traps, local rhythms to respect"]
 }`;
 }
 
-// ── HANDLER ──────────────────────────────────────────────────────────────────
+function buildSectionPrompt({ form, dayCount, chunk, blueprint }) {
+  return `${buildTripContext(form, dayCount)}
+
+ROUTE BLUEPRINT:
+${JSON.stringify(compactBlueprintForPrompt(blueprint))}
+
+Generate ONLY days ${chunk.start}-${chunk.end}. Do not include days outside this range.
+Return exactly one day object for each of these day numbers: ${chunk.days.join(", ")}.
+
+DAY RULES:
+- 6-8 timeline rows per day.
+- Max 3 major activities per day; food-only, short transit, and recovery do not count.
+- Exactly one sunset row per day, scheduled 25-30 minutes before sunset, with a short reason why that spot over the obvious viewpoint.
+- Include one top time-sensitive activity at its best time.
+- Add recovery after intense mornings.
+- Across each place, include mustDo:true entries for early/pre-crowd, cultural/local, quiet/recovery, and offbeat angles where possible.
+- Each day has 2-3 named food spots with specific dishes.
+- tips/hacks/warnings should be concise and practical; hacks must include exact timing.
+- Keep geographic flow smooth. No zigzag day plans.
+
+Return ONLY this JSON:
+{
+  "days":[{
+    "dayNumber":${chunk.start},
+    "place":"actual city/town/village",
+    "title":"evocative but specific",
+    "subtitle":"morning, afternoon, evening arc",
+    "timeline":[{"time":"5:30 AM","title":"activity","desc":"max 30 words","type":"highlight|travel|food|sunset|stay|tip|recovery","mustDo":false}],
+    "food":["Named Place - specific dish - why"],
+    "stay":{"locality":"name","why":"max 30 words","notWhere":"max 24 words"},
+    "tips":["max 2, max 20 words each"],
+    "hacks":["max 2, exact timing"],
+    "warnings":["max 2, max 16 words each"],
+    "budget":"X/person"
+  }]
+}`;
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -309,45 +307,60 @@ export default async function handler(req, res) {
   if (!form || !form.destinations) return res.status(400).json({ error: "Missing form data" });
   if (!process.env.DEEPSEEK_API_KEY) return res.status(500).json({ error: "Missing DEEPSEEK_API_KEY" });
 
-  try {
-    // ── DeepSeek composition ──────────────────────────────────────────────────
-    const intelligence = {
-      research_mode: "DeepSeek-only model knowledge. Infer forum-style restaurants, local activities, crowd hacks, stay areas, seasonal notes, and tourist traps without claiming live search.",
-    };
-    const conf = { grade: "high", score: 15, maxScore: 15, weakAreas: [] };
+  const dayCount = getTripDayCount(form);
+  const chunks = buildChunks(dayCount);
 
-    console.log(`[Generate] Composing ${form.destinations} via ${DEEPSEEK_STAGE2_MODEL}`);
-    const s2 = await callDeepSeekJSON({
-      model: DEEPSEEK_STAGE2_MODEL,
-      maxTokens: 11000,
-      system: STAGE2_SYSTEM,
-      user: buildStage2Prompt(form, intelligence, conf),
+  try {
+    console.log(`[Blueprint] ${form.destinations} | days:${dayCount} | model:${DEEPSEEK_BLUEPRINT_MODEL}`);
+    const blueprintResponse = await callDeepSeekJSON({
+      model: DEEPSEEK_BLUEPRINT_MODEL,
+      maxTokens: 3200,
+      system: BRAND_SYSTEM,
+      user: buildBlueprintPrompt(form, dayCount, chunks),
+      label: "Blueprint",
     });
 
-    // Validate JSON completeness
-    let cleaned = s2.text;
-    console.log(`[S2] tokens: in:${s2.usage?.prompt_tokens} out:${s2.usage?.completion_tokens} | raw_chars:${cleaned.length}`);
+    const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
+    const blueprint = parsedBlueprint.json;
+    if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
 
-    let parsedTrip;
-    try {
-      const parsed = parseOrRepairJson(cleaned, "Stage 2 itinerary");
-      parsedTrip = parsed.json;
-      cleaned = parsed.text;
-      if (parsed.repaired) console.log("[S2] jsonrepair fixed itinerary JSON");
-    } catch(e) {
-      console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
-      return res.status(500).json({ error: "Output was not valid JSON after repair. Try a shorter trip or fewer days." });
-    }
+    console.log(`[Sections] ${chunks.length} chunks via ${DEEPSEEK_SECTION_MODEL}`);
+    const sectionResponses = await Promise.all(chunks.map(async (chunk) => {
+      const maxTokens = Math.min(5200, 2200 + chunk.days.length * 950);
+      const response = await callDeepSeekJSON({
+        model: DEEPSEEK_SECTION_MODEL,
+        maxTokens,
+        system: BRAND_SYSTEM,
+        user: buildSectionPrompt({ form, dayCount, chunk, blueprint }),
+        label: `Days ${chunk.start}-${chunk.end}`,
+      });
+      const parsed = parseOrRepairJson(response.text, `Days ${chunk.start}-${chunk.end}`);
+      if (parsed.repaired) console.log(`[Sections] jsonrepair fixed days ${chunk.start}-${chunk.end}`);
+      const days = asArray(parsed.json?.days).map((day, index) => ({
+        ...day,
+        dayNumber: Number(day?.dayNumber) || chunk.days[index] || chunk.start + index,
+      }));
+      return { json: { ...parsed.json, days }, usage: response.usage };
+    }));
 
-    console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2.usage?.completion_tokens}tok`);
+    const trip = assembleTrip({ blueprint, dayChunks: sectionResponses.map((section) => section.json), dayCount });
+    const cleaned = JSON.stringify(trip);
+
+    console.log(`[Done] ${form.destinations} | days:${trip.days.length} | chunks:${chunks.length}`);
     return res.status(200).json({
-      trip: parsedTrip,
+      trip,
       content: [{ type: "text", text: cleaned }],
-      usage: s2.usage,
+      usage: {
+        blueprint: blueprintResponse.usage,
+        sections: sectionResponses.map((section) => section.usage).filter(Boolean),
+      },
     });
 
   } catch (err) {
-    console.error("[Error]", err);
+    console.error("[Generate Error]", err);
+    if (err.name === "AbortError") {
+      return res.status(504).json({ error: "Generation took too long. Please try again, or reduce the trip length/details." });
+    }
     return res.status(500).json({ error: err.message });
   }
 }
