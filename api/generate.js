@@ -11,6 +11,13 @@ const CALL_TIMEOUT_MS = 95000;
 const MAX_SUPPORTED_DAYS = 14;
 const CHUNK_SIZE = 3;
 
+class EmptyModelResponseError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "EmptyModelResponseError";
+  }
+}
+
 function cleanJsonText(text = "") {
   let cleaned = text
     .trim()
@@ -43,6 +50,17 @@ function parseOrRepairJson(text, label) {
   }
 }
 
+function getChoiceContent(choice) {
+  const content = choice?.message?.content;
+  if (Array.isArray(content)) {
+    return content.map((part) => {
+      if (typeof part === "string") return part;
+      return part?.text || part?.content || "";
+    }).join("");
+  }
+  return typeof content === "string" ? content : "";
+}
+
 async function callDeepSeekJSON({ model, system, user, maxTokens, label }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
@@ -71,13 +89,41 @@ async function callDeepSeekJSON({ model, system, user, maxTokens, label }) {
     throw new Error(data.error?.message || `DeepSeek API error (${response.status})`);
   }
 
-  const content = data.choices?.[0]?.message?.content || "";
-  if (!content.trim()) throw new Error(`${label || "DeepSeek"} returned an empty response`);
+  const choice = data.choices?.[0] || {};
+  const content = getChoiceContent(choice);
+  if (!content.trim()) {
+    const finishReason = choice.finish_reason || "unknown";
+    console.warn(`[DeepSeek Empty] ${label || "request"} | model:${model} | finish:${finishReason} | usage:${JSON.stringify(data.usage || {})}`);
+    throw new EmptyModelResponseError(`${label || "DeepSeek"} returned an empty response`);
+  }
 
   return {
     text: cleanJsonText(content),
     usage: data.usage || {},
   };
+}
+
+async function callDeepSeekJSONWithRetry(options, retries = 1) {
+  let lastError;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await callDeepSeekJSON(options);
+    } catch (err) {
+      lastError = err;
+      const retryable = err.name === "EmptyModelResponseError" || err.name === "AbortError";
+      if (!retryable || attempt === retries) break;
+      console.warn(`[DeepSeek Retry] ${options.label || "request"} attempt ${attempt + 2}/${retries + 1} after ${err.message}`);
+    }
+  }
+  throw lastError;
+}
+
+function splitDestinations(destinations = "") {
+  const parts = destinations
+    .split(/\s*(?:,|;|\||\+|->| to )\s*/i)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts : [destinations || "Route stop"];
 }
 
 function parseDateOnly(value) {
@@ -154,13 +200,25 @@ function normaliseDay(day, fallbackNumber) {
 }
 
 function ensureFoodMap(blueprint, days) {
-  const existing = asArray(blueprint.foodMap).filter((group) => group?.place);
+  const existing = asArray(blueprint.foodMap).filter((group) => group?.place && asArray(group.spots).length);
   if (existing.length) return existing;
 
   const places = [...new Set(days.map((day) => day.place).filter(Boolean))];
   return places.map((place) => ({
     place,
-    spots: [],
+    spots: days
+      .filter((day) => day.place === place)
+      .flatMap((day) => asArray(day.food))
+      .slice(0, 3)
+      .map((food) => {
+        const parts = String(food).split(/\s+(?:-|\u2014)\s+/).map((part) => part.trim()).filter(Boolean);
+        return {
+          name: parts[0] || String(food),
+          order: parts[1] || "local order",
+          bestFor: "local meal",
+          why: parts[2] || "Fits the route rhythm",
+        };
+      }),
   }));
 }
 
@@ -225,6 +283,50 @@ Budget: ${form.budget} per person
 Transport: ${transport}
 Preferences: ${form.preferences || ""}
 Women's safety prioritized: ${form.prioritizeWomensSafety ? "yes" : "no"}`;
+}
+
+function buildLocalBlueprint(form, dayCount) {
+  const stops = splitDestinations(form.destinations);
+  return {
+    tripTitle: `${form.destinations} Side Quest`,
+    tagline: "A slower route shaped around depth, recovery, and local texture.",
+    travelStyle: "Conscious travel",
+    moodTags: ["slow", "local", "restorative", "offbeat"],
+    philosophy: "This route balances meaningful local encounters with realistic pacing, recovery windows, and quieter alternatives to the obvious tourist circuit.",
+    memories: ["A quiet sunset away from the crowd", "A local meal that anchors the day", "A slower morning with room to breathe"],
+    overview: {
+      routeStops: stops,
+      duration: `${dayCount} days`,
+      transport: form.travelMode === "Suggested" ? "Best route to be recommended inside the day plan" : form.travelMode,
+      transportNote: form.travelMode === "Suggested" ? `Start from ${form.departure}; choose the most sensible route for budget and arrival time.` : "Use the selected travel mode.",
+      originalTransport: form.travelMode,
+      totalBudget: `${form.budget}/person`,
+      season: form.dateFrom || form.dateTo ? `Planned for ${form.dateFrom || "flexible"} to ${form.dateTo || "flexible"}.` : "Season flexible; verify live weather and closures before booking.",
+    },
+    routePlan: stops.map((place, index) => ({
+      place,
+      days: Array.from({ length: dayCount }, (_, i) => i + 1).filter((day) => (day - 1) % stops.length === index),
+      stay: { locality: "central but quiet local neighbourhood", why: "Keeps transfers simple while avoiding the busiest tourist strip.", notWhere: "Avoid the loudest nightlife or package-tour cluster." },
+      arc: "Use this stop for a grounded mix of local food, depth, and recovery.",
+    })),
+    foodMap: [],
+    costs: {
+      transport: { amount: "TBD", note: "Estimate inside route details" },
+      accommodation: { amount: "TBD", note: "Small stays or homestays preferred" },
+      food: { amount: "TBD", note: "Local meals and cafes" },
+      activities: { amount: "TBD", note: "Depth-first experiences" },
+      misc: { amount: "TBD", note: "Buffer for transfers and tips" },
+      total: `${form.budget}/person`,
+    },
+    differentiators: [
+      "The route prioritizes recovery instead of packing every hour.",
+      "Sunsets and time-sensitive moments anchor the geography of each day.",
+      "Food choices are treated as part of the experience, not filler.",
+      "Stay areas bias toward calmer, locally grounded neighbourhoods.",
+    ],
+    packing: ["Comfortable walking shoes", "Light day bag", "Reusable bottle", "Layer for evenings", "Offline maps"],
+    generationNotes: ["Blueprint fallback used after empty model response; day chunks should infer specifics."],
+  };
 }
 
 function buildBlueprintPrompt(form, dayCount, chunks) {
@@ -312,28 +414,36 @@ export default async function handler(req, res) {
 
   try {
     console.log(`[Blueprint] ${form.destinations} | days:${dayCount} | model:${DEEPSEEK_BLUEPRINT_MODEL}`);
-    const blueprintResponse = await callDeepSeekJSON({
-      model: DEEPSEEK_BLUEPRINT_MODEL,
-      maxTokens: 3200,
-      system: BRAND_SYSTEM,
-      user: buildBlueprintPrompt(form, dayCount, chunks),
-      label: "Blueprint",
-    });
+    let blueprintResponse = { usage: {}, fallback: true };
+    let blueprint;
+    try {
+      blueprintResponse = await callDeepSeekJSONWithRetry({
+        model: DEEPSEEK_BLUEPRINT_MODEL,
+        maxTokens: 3800,
+        system: BRAND_SYSTEM,
+        user: buildBlueprintPrompt(form, dayCount, chunks),
+        label: "Blueprint",
+      }, 2);
 
-    const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
-    const blueprint = parsedBlueprint.json;
-    if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
+      const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
+      blueprint = parsedBlueprint.json;
+      if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
+    } catch (err) {
+      if (err.name !== "EmptyModelResponseError") throw err;
+      console.warn("[Blueprint] empty after retries; using local fallback blueprint");
+      blueprint = buildLocalBlueprint(form, dayCount);
+    }
 
     console.log(`[Sections] ${chunks.length} chunks via ${DEEPSEEK_SECTION_MODEL}`);
     const sectionResponses = await Promise.all(chunks.map(async (chunk) => {
       const maxTokens = Math.min(5200, 2200 + chunk.days.length * 950);
-      const response = await callDeepSeekJSON({
+      const response = await callDeepSeekJSONWithRetry({
         model: DEEPSEEK_SECTION_MODEL,
         maxTokens,
         system: BRAND_SYSTEM,
         user: buildSectionPrompt({ form, dayCount, chunk, blueprint }),
         label: `Days ${chunk.start}-${chunk.end}`,
-      });
+      }, 1);
       const parsed = parseOrRepairJson(response.text, `Days ${chunk.start}-${chunk.end}`);
       if (parsed.repaired) console.log(`[Sections] jsonrepair fixed days ${chunk.start}-${chunk.end}`);
       const days = asArray(parsed.json?.days).map((day, index) => ({
