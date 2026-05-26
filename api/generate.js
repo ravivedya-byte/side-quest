@@ -1,10 +1,9 @@
 import { jsonrepair } from "jsonrepair";
 
 // ═══════════════════════════════════════════════════════════════════════════
-// SIDE QUEST — ADAPTIVE TWO-STAGE PIPELINE (COMPRESSED)
-// Stage 1: DeepSeek Flash → structured intelligence JSON
-// Stage 2: DeepSeek Pro → compressed premium itinerary JSON
-// Fallback: DeepSeek Flash → targeted intelligence patch when confidence is LOW
+// SIDE QUEST — SINGLE-STAGE DEEPSEEK PIPELINE (COMPRESSED)
+// DeepSeek composes the itinerary directly; deterministic JSON repair handles
+// occasional malformed output without extra model calls.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ── CONFIDENCE SCORING ──────────────────────────────────────────────────────
@@ -114,7 +113,7 @@ Return ONLY JSON:
 // ── DEEPSEEK CLIENT ───────────────────────────────────────────────────────────
 const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
 const DEEPSEEK_STAGE1_MODEL = process.env.DEEPSEEK_STAGE1_MODEL || "deepseek-v4-flash";
-const DEEPSEEK_STAGE2_MODEL = process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-pro";
+const DEEPSEEK_STAGE2_MODEL = process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
 const DEEPSEEK_FALLBACK_MODEL = process.env.DEEPSEEK_FALLBACK_MODEL || DEEPSEEK_STAGE1_MODEL;
 
 function cleanJsonText(text = "") {
@@ -149,24 +148,12 @@ function parseOrRepairJson(text, label) {
   }
 }
 
-async function repairJSON({ rawText, parseError, context }) {
-  const repair = await callDeepSeekJSON({
-    model: DEEPSEEK_FALLBACK_MODEL,
-    maxTokens: 16000,
-    system: `You repair malformed JSON. Return ONLY one valid JSON object. No markdown, no comments, no explanation. Preserve all itinerary content and schema fields; only fix syntax, escaping, missing commas/brackets, and invalid JSON wrappers.`,
-    user: `Context: ${context}
-Parse error: ${parseError}
-
-Malformed JSON/text:
-${rawText}`,
-  });
-
-  return repair.text;
-}
-
 async function callDeepSeekJSON({ model, system, user, maxTokens }) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 240000);
   const response = await fetch(DEEPSEEK_API_URL, {
     method: "POST",
+    signal: controller.signal,
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`,
@@ -181,7 +168,7 @@ async function callDeepSeekJSON({ model, system, user, maxTokens }) {
       max_tokens: maxTokens,
       stream: false,
     }),
-  });
+  }).finally(() => clearTimeout(timeout));
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -323,58 +310,16 @@ export default async function handler(req, res) {
   if (!process.env.DEEPSEEK_API_KEY) return res.status(500).json({ error: "Missing DEEPSEEK_API_KEY" });
 
   try {
-    // ── STAGE 1: DeepSeek intelligence extraction ─────────────────────────────
-    console.log(`[S1] Starting: ${form.destinations} via ${DEEPSEEK_STAGE1_MODEL}`);
-    const s1 = await callDeepSeekJSON({
-      model: DEEPSEEK_STAGE1_MODEL,
-      system: STAGE1_SYSTEM,
-      user: buildStage1Prompt(form),
-      maxTokens: 1600,
-    });
-    console.log(`[S1] tokens: in:${s1.usage?.prompt_tokens} out:${s1.usage?.completion_tokens}`);
+    // ── DeepSeek composition ──────────────────────────────────────────────────
+    const intelligence = {
+      research_mode: "DeepSeek-only model knowledge. Infer forum-style restaurants, local activities, crowd hacks, stay areas, seasonal notes, and tourist traps without claiming live search.",
+    };
+    const conf = { grade: "high", score: 15, maxScore: 15, weakAreas: [] };
 
-    let intelligence = {};
-    try {
-      const parsed = parseOrRepairJson(s1.text, "Stage 1 intelligence");
-      intelligence = parsed.json;
-      if (parsed.repaired) console.log("[S1] jsonrepair fixed intelligence JSON");
-    } catch (e) {
-      console.log(`[S1] parse failed, continuing with empty intelligence: ${e.message}`);
-    }
-
-    // ── CONFIDENCE EVALUATION ─────────────────────────────────────────────────
-    const conf = scoreIntelligence(intelligence);
-    console.log(`[Conf] grade:${conf.grade} score:${conf.score}/${conf.maxScore} | ${conf.log}`);
-
-    // ── ADAPTIVE FALLBACK ─────────────────────────────────────────────────────
-    if (conf.grade === "low") {
-      const fbQuery = buildFallbackQuery(form.destinations, conf.weakAreas);
-      console.log(`[Fallback] triggered. focus: "${fbQuery}"`);
-      const fb = await callDeepSeekJSON({
-        model: DEEPSEEK_FALLBACK_MODEL,
-        maxTokens: 900,
-        system: `Return compact JSON only — no prose. Use best-known travel intelligence; do not claim live search or current certainty.`,
-        user: `Focus: "${fbQuery}"\n\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}`,
-      });
-      console.log(`[Fallback] tokens: in:${fb.usage?.prompt_tokens} out:${fb.usage?.completion_tokens}`);
-      try {
-        const parsedFallback = parseOrRepairJson(fb.text, "Fallback intelligence");
-        const fbI = parsedFallback.json;
-        if (parsedFallback.repaired) console.log("[Fallback] jsonrepair fixed intelligence JSON");
-        if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems||[]), ...fbI.hidden_gems].slice(0,6);
-        if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks||[]), ...fbI.hacks].slice(0,5);
-        if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas||[]), ...fbI.stay_areas.map(s=>({name:s,why:"local rec",avoid_if:""}))].slice(0,4);
-        if (fbI.food?.length) intelligence.food_spots = [...(intelligence.food_spots||[]), ...fbI.food].slice(0,5);
-        if (fbI.insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbI.insights].filter(Boolean).join(" | ");
-        console.log("[Fallback] intelligence merged");
-      } catch { console.log("[Fallback] parse failed, using original"); }
-    }
-
-    // ── STAGE 2: DeepSeek composition ─────────────────────────────────────────
-    console.log(`[S2] Composing via ${DEEPSEEK_STAGE2_MODEL} (fallback:${conf.grade==="low"})`);
+    console.log(`[Generate] Composing ${form.destinations} via ${DEEPSEEK_STAGE2_MODEL}`);
     const s2 = await callDeepSeekJSON({
       model: DEEPSEEK_STAGE2_MODEL,
-      maxTokens: 16000,
+      maxTokens: 11000,
       system: STAGE2_SYSTEM,
       user: buildStage2Prompt(form, intelligence, conf),
     });
@@ -391,21 +336,7 @@ export default async function handler(req, res) {
       if (parsed.repaired) console.log("[S2] jsonrepair fixed itinerary JSON");
     } catch(e) {
       console.error(`[S2 Parse Error] ${e.message} | preview: ${cleaned.slice(0,400)}`);
-      try {
-        console.log("[S2 Repair] Attempting DeepSeek JSON repair");
-        cleaned = await repairJSON({
-          rawText: cleaned,
-          parseError: e.message,
-          context: `${form.destinations} itinerary output`,
-        });
-        const parsed = parseOrRepairJson(cleaned, "Stage 2 repaired itinerary");
-        parsedTrip = parsed.json;
-        cleaned = parsed.text;
-        console.log("[S2 Repair] JSON repaired successfully");
-      } catch (repairErr) {
-        console.error(`[S2 Repair Error] ${repairErr.message} | preview: ${cleaned.slice(0,400)}`);
-        return res.status(500).json({ error: "Output was not valid JSON after repair. Try a shorter trip or fewer days." });
-      }
+      return res.status(500).json({ error: "Output was not valid JSON after repair. Try a shorter trip or fewer days." });
     }
 
     console.log(`[Done] ${form.destinations} | conf:${conf.grade} | s2_out:${s2.usage?.completion_tokens}tok`);

@@ -105,11 +105,11 @@ const FACTS = [
 ];
 
 const RMSGS = [
-  "Scanning forums for what locals actually recommend…",
+  "Inferring forum-style local recommendations…",
   "Cross-referencing crowd-free timings…",
   "Finding the spots tourists haven't discovered yet…",
   "Comparing neighbourhoods by vibe, not star rating…",
-  "Reading years of forum threads about this route…",
+  "Weighing old forum-style travel wisdom…",
   "Filtering out the tourist menu…",
   "Checking which spots are empty at which hour…",
   "Composing your blueprint…",
