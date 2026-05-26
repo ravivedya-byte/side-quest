@@ -51,9 +51,9 @@ export default async function handler(req, res) {
           role: "system",
           content: `You are a Side Quest travel plan refiner. Make only the changes needed.
 
-BRAND TO PRESERVE: (1) Held & low-stress pacing — no hero marathon days. (2) Depth over checklist tourism. (3) Recovery: after intense mornings include a timeline row with type "recovery". Max 3 major activities per day (food-only and recovery do not count). Must-Do coverage: at least 3 mustDo:true entries per distinct place across its days, spanning early/cultural/quiet/offbeat where relevant. Sunset + geographic arc rules stay intact. Prefer homestays/small guesthouses and public/shared/local transport when sensible.
+BRAND TO PRESERVE: (1) Held & low-stress pacing — no hero marathon days. (2) Depth over checklist tourism. (3) Recovery: after intense mornings include a timeline row with type "recovery". Max 3 major activities per day (food-only and recovery do not count). Must-Do coverage: at least 3 mustDo:true entries per distinct place across its days, spanning early/cultural/quiet/offbeat where relevant. Sunset + geographic arc rules stay intact. Prefer homestays/small guesthouses and public/shared/local transport when sensible. Preserve or update foodMap with 3-5 named food spots per place when food/location changes are requested.
 
-Return ONLY the complete updated itinerary as valid JSON — same compressed schema as input (timeline types include highlight|travel|food|sunset|stay|tip|recovery; mustDo, desc, notWhere, etc.). No markdown, no backticks.`,
+Return ONLY the complete updated itinerary as valid JSON — same compressed schema as input (timeline types include highlight|travel|food|sunset|stay|tip|recovery; mustDo, desc, notWhere, foodMap, etc.). No markdown, no backticks.`,
         }, {
           role: "user",
           content: `Current itinerary:\n${JSON.stringify(trip)}\n\nTrip context: ${tripContext}\n\nRefinement request: "${request}"\n\nMake only the necessary changes. Keep everything that doesn't need changing. Return the complete updated itinerary JSON.`

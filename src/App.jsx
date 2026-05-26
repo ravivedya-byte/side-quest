@@ -23,6 +23,26 @@ const T = {
   terraBg: "rgba(184,74,50,0.1)",
 };
 
+const R = {
+  bg: "#080705",
+  panel: "#15110d",
+  panel2: "#201912",
+  panel3: "#2a2118",
+  text: "#f8efd9",
+  textSoft: "#decfb3",
+  muted: "rgba(248,239,217,0.62)",
+  line: "rgba(248,239,217,0.14)",
+  lineStrong: "rgba(248,239,217,0.22)",
+  accent: "#d7652d",
+  accentSoft: "rgba(215,101,45,0.16)",
+  sage: "#a7b88d",
+  sageBg: "rgba(167,184,141,0.12)",
+  teal: "#7bc7bd",
+  tealBg: "rgba(123,199,189,0.12)",
+  terra: "#df815d",
+  terraBg: "rgba(223,129,93,0.13)",
+};
+
 const HERO_BG =
   "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=2400&q=75";
 
@@ -34,38 +54,6 @@ const F = {
   sans: "'Inter', system-ui, sans-serif",
   mono: "'DM Mono', ui-monospace, monospace",
 };
-
-const FEATURED = [
-  {
-    country: "Vietnam",
-    tagline: "The River Pulse",
-    meta: "4 DAYS • HANOI → HOI AN",
-    img: "https://images.unsplash.com/photo-1528127269322-539801943592?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    country: "Japan",
-    tagline: "The Quiet Way",
-    meta: "6 DAYS • KYOTO LOOP",
-    img: "https://images.unsplash.com/photo-1528164344705-47542687000d?auto=format&fit=crop&w=800&q=80",
-  },
-  {
-    country: "Iceland",
-    tagline: "Fire & Ice Roads",
-    meta: "5 DAYS • REYKJAVÍK RING",
-    img: "https://images.unsplash.com/photo-1504893524553-b855bce32c67?auto=format&fit=crop&w=800&q=80",
-  },
-];
-
-const CURRENCIES = [
-  { code:"INR", symbol:"₹", label:"₹ INR" },
-  { code:"USD", symbol:"$", label:"$ USD" },
-  { code:"EUR", symbol:"€", label:"€ EUR" },
-  { code:"GBP", symbol:"£", label:"£ GBP" },
-  { code:"JPY", symbol:"¥", label:"¥ JPY" },
-  { code:"SGD", symbol:"S$", label:"S$ SGD" },
-  { code:"THB", symbol:"฿", label:"฿ THB" },
-  { code:"AUD", symbol:"A$", label:"A$ AUD" },
-];
 
 function useGlobalStyles() {
   useEffect(() => {
@@ -81,7 +69,7 @@ function useGlobalStyles() {
       .sq-input::placeholder { color:rgba(26,25,23,0.35); }
       input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
       input[type=date]::-webkit-calendar-picker-indicator { opacity:0.55; cursor:pointer; }
-      .sq-day-head:hover { background:${T.shell}!important; }
+      .sq-day-head:hover { background:var(--sq-day-hover, ${T.shell})!important; }
       @media print {
         .np { display:none!important; }
         .sq-refine { display:none!important; }
@@ -139,9 +127,9 @@ function CompassStar({ size = 28, color = T.accent }) {
   );
 }
 
-function Wordmark({ size = "full" }) {
-  const col = T.ink;
-  const sub = T.muted;
+function Wordmark({ size = "full", light = false }) {
+  const col = light ? R.text : T.ink;
+  const sub = light ? R.muted : T.muted;
   if (size === "small") {
     return (
       <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "1.15rem", letterSpacing: "0.28em", color: col, textTransform: "uppercase" }}>
@@ -164,7 +152,7 @@ function Wordmark({ size = "full" }) {
   );
 }
 
-function Lbl({ children, color = T.muted }) {
+function Lbl({ children, color = "var(--sq-label, #6b6560)" }) {
   return (
     <div style={{ fontFamily: F.mono, fontSize: "0.52rem", letterSpacing: "0.2em", color, textTransform: "uppercase", marginBottom: 10, fontWeight: 500, opacity: 0.95 }}>
       {children}
@@ -197,29 +185,29 @@ function Badge({ children, bg = T.accent, color = T.white, style = {} }) {
 function WhyBlock({ label = "Why we chose this", text }) {
   if (!text) return null;
   return (
-    <div style={{ background: T.accentSoft, borderLeft: `3px solid ${T.accent}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", marginTop: 10 }}>
-      <div style={{ fontFamily: F.mono, fontSize: "0.5rem", letterSpacing: "0.18em", color: T.accent, textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
-      <p style={{ fontFamily: F.sans, fontSize: "0.87rem", color: T.inkSoft, lineHeight: 1.75, margin: 0 }}>{text}</p>
+    <div style={{ background: "var(--sq-accent-soft, rgba(201,84,32,0.12))", borderLeft: `3px solid var(--sq-accent, ${T.accent})`, borderRadius: "0 8px 8px 0", padding: "12px 16px", marginTop: 10 }}>
+      <div style={{ fontFamily: F.mono, fontSize: "0.5rem", letterSpacing: "0.18em", color: "var(--sq-accent, #c95420)", textTransform: "uppercase", marginBottom: 6 }}>{label}</div>
+      <p style={{ fontFamily: F.sans, fontSize: "0.87rem", color: "var(--sq-text-soft, #3d3935)", lineHeight: 1.75, margin: 0 }}>{text}</p>
     </div>
   );
 }
 
 const TIP = ({ t }) => (
-  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: T.sageBg, borderLeft: `3px solid ${T.sage}`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
-    <span style={{ color: T.sage, fontSize: "0.7rem", flexShrink: 0 }}>→</span>
-    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: T.sage, lineHeight: 1.7, margin: 0 }}>{t}</p>
+  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: "var(--sq-sage-bg, rgba(61,90,64,0.1))", borderLeft: `3px solid var(--sq-sage, ${T.sage})`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
+    <span style={{ color: "var(--sq-sage, #3d5a40)", fontSize: "0.7rem", flexShrink: 0 }}>→</span>
+    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: "var(--sq-sage, #3d5a40)", lineHeight: 1.7, margin: 0 }}>{t}</p>
   </div>
 );
 const HACK = ({ t }) => (
-  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: T.tealBg, borderLeft: `3px solid ${T.teal}`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
-    <span style={{ color: T.teal, fontSize: "0.7rem", flexShrink: 0 }}>◎</span>
-    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: T.teal, lineHeight: 1.7, margin: 0 }}>{t}</p>
+  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: "var(--sq-teal-bg, rgba(42,138,130,0.12))", borderLeft: `3px solid var(--sq-teal, ${T.teal})`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
+    <span style={{ color: "var(--sq-teal, #2a8a82)", fontSize: "0.7rem", flexShrink: 0 }}>◎</span>
+    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: "var(--sq-teal, #2a8a82)", lineHeight: 1.7, margin: 0 }}>{t}</p>
   </div>
 );
 const WARN = ({ t }) => (
-  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: T.terraBg, borderLeft: `3px solid ${T.terra}`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
-    <span style={{ color: T.terraLight, fontSize: "0.7rem", flexShrink: 0 }}>!</span>
-    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: T.terra, lineHeight: 1.7, margin: 0 }}>{t}</p>
+  <div style={{ display: "flex", gap: 10, padding: "9px 13px", background: "var(--sq-terra-bg, rgba(184,74,50,0.1))", borderLeft: `3px solid var(--sq-terra, ${T.terra})`, borderRadius: "0 8px 8px 0", marginBottom: 6 }}>
+    <span style={{ color: "var(--sq-terra, #b84a32)", fontSize: "0.7rem", flexShrink: 0 }}>!</span>
+    <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: "var(--sq-terra, #b84a32)", lineHeight: 1.7, margin: 0 }}>{t}</p>
   </div>
 );
 
@@ -303,73 +291,73 @@ function TripHero({ trip }) {
     <div style={{ marginBottom: 36 }}>
       <div
         style={{
-          background: `linear-gradient(135deg, ${T.white}, ${T.shell})`,
-          border: `1px solid ${T.line}`,
-          borderLeft: `4px solid ${T.accent}`,
+          background: `linear-gradient(135deg, ${R.panel2}, ${R.panel})`,
+          border: `1px solid ${R.line}`,
+          borderLeft: `4px solid ${R.accent}`,
           borderRadius: 16,
           padding: "32px 28px 28px",
-          boxShadow: "0 12px 40px rgba(26,25,23,0.06)",
+          boxShadow: "0 18px 60px rgba(0,0,0,0.24)",
         }}
       >
         {trip.travelStyle && (
-          <Badge bg={T.accentSoft} color={T.accent} style={{ marginBottom: 14, border: `1px solid rgba(201,84,32,0.35)` }}>
+          <Badge bg={R.accentSoft} color={R.accent} style={{ marginBottom: 14, border: `1px solid rgba(215,101,45,0.4)` }}>
             {trip.travelStyle}
           </Badge>
         )}
-        <h1 style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "clamp(1.45rem,3.5vw,2.1rem)", color: T.ink, lineHeight: 1.22, marginBottom: 12, letterSpacing: "0.04em" }}>{trip.tripTitle}</h1>
-        <p style={{ fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, fontSize: "1.05rem", color: T.muted, lineHeight: 1.65 }}>{trip.tagline}</p>
+        <h1 style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "clamp(1.45rem,3.5vw,2.1rem)", color: R.text, lineHeight: 1.22, marginBottom: 12, letterSpacing: "0.04em" }}>{trip.tripTitle}</h1>
+        <p style={{ fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, fontSize: "1.05rem", color: R.muted, lineHeight: 1.65 }}>{trip.tagline}</p>
       </div>
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          background: T.white,
-          border: `1px solid ${T.line}`,
-          borderTop: `3px solid ${T.accent}`,
+          background: R.panel2,
+          border: `1px solid ${R.line}`,
+          borderTop: `3px solid ${R.accent}`,
           borderRadius: "0 0 16px 16px",
           overflow: "hidden",
-          boxShadow: "0 8px 28px rgba(26,25,23,0.05)",
+          boxShadow: "0 8px 28px rgba(0,0,0,0.18)",
         }}
       >
-        <div style={{ padding: "22px 20px", borderRight: `1px solid ${T.line}` }}>
+        <div style={{ padding: "22px 20px", borderRight: `1px solid ${R.line}` }}>
           <Lbl>Route</Lbl>
           {(trip.overview?.routeStops || []).map((stop, i) => (
             <div key={i} style={{ display: "flex", flexDirection: "column" }}>
-              <span style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: T.ink, lineHeight: 1.3 }}>{stop}</span>
+              <span style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: R.text, lineHeight: 1.3 }}>{stop}</span>
               {i < (trip.overview?.routeStops?.length || 0) - 1 && (
-                <span style={{ fontFamily: F.mono, fontSize: "0.65rem", color: T.accent, margin: "3px 0 4px", lineHeight: 1 }}>↓</span>
+                <span style={{ fontFamily: F.mono, fontSize: "0.65rem", color: R.accent, margin: "3px 0 4px", lineHeight: 1 }}>↓</span>
               )}
             </div>
           ))}
         </div>
-        <div style={{ padding: "22px 20px", borderRight: `1px solid ${T.line}` }}>
+        <div style={{ padding: "22px 20px", borderRight: `1px solid ${R.line}` }}>
           {[["Duration", trip.overview?.duration], ["Transport", trip.overview?.transport]].map(([l, v]) =>
             v ? (
               <div key={l} style={{ marginBottom: 16 }}>
                 <Lbl>{l}</Lbl>
-                <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: T.ink }}>{v}</div>
+                <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: R.text }}>{v}</div>
               </div>
             ) : null
           )}
           {trip.overview?.transportNote && (
-            <div style={{ background: T.terraBg, borderLeft: `3px solid ${T.terra}`, padding: "10px 14px", borderRadius: "0 8px 8px 0", marginBottom: 12 }}>
-              <p style={{ fontFamily: F.mono, fontSize: "0.65rem", color: T.terra, lineHeight: 1.6, margin: 0 }}>{trip.overview.transportNote}</p>
+            <div style={{ background: R.terraBg, borderLeft: `3px solid ${R.terra}`, padding: "10px 14px", borderRadius: "0 8px 8px 0", marginBottom: 12 }}>
+              <p style={{ fontFamily: F.mono, fontSize: "0.65rem", color: R.terra, lineHeight: 1.6, margin: 0 }}>{trip.overview.transportNote}</p>
             </div>
           )}
         </div>
         <div style={{ padding: "22px 20px" }}>
           <Lbl>Budget</Lbl>
-          <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: T.ink, marginBottom: 16 }}>{trip.overview?.totalBudget}</div>
+          <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.92rem", color: R.text, marginBottom: 16 }}>{trip.overview?.totalBudget}</div>
           {trip.overview?.season && (
             <>
               <Lbl>Season</Lbl>
-              <div style={{ fontFamily: F.sans, fontSize: "0.84rem", color: T.inkSoft, lineHeight: 1.5, marginBottom: 14 }}>{trip.overview.season}</div>
+              <div style={{ fontFamily: F.sans, fontSize: "0.84rem", color: R.textSoft, lineHeight: 1.5, marginBottom: 14 }}>{trip.overview.season}</div>
             </>
           )}
           {trip.moodTags?.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {trip.moodTags.map((t, i) => (
-                <Badge key={i} bg={T.accentSoft} color={T.accent} style={{ border: `1px solid rgba(201,84,32,0.35)` }}>
+                <Badge key={i} bg={R.accentSoft} color={R.accent} style={{ border: `1px solid rgba(215,101,45,0.4)` }}>
                   {t}
                 </Badge>
               ))}
@@ -379,19 +367,19 @@ function TripHero({ trip }) {
       </div>
 
       {trip.philosophy && (
-        <div style={{ background: T.shell, border: `1px solid ${T.line}`, borderTop: "none", padding: "22px 26px" }}>
+        <div style={{ background: R.panel3, border: `1px solid ${R.line}`, borderTop: "none", padding: "22px 26px" }}>
           <Lbl>Trip Philosophy</Lbl>
-          <p style={{ fontFamily: F.serif, fontWeight: 400, fontSize: "1rem", color: T.inkSoft, lineHeight: 1.85, margin: 0 }}>{trip.philosophy}</p>
+          <p style={{ fontFamily: F.serif, fontWeight: 400, fontSize: "1rem", color: R.textSoft, lineHeight: 1.85, margin: 0 }}>{trip.philosophy}</p>
         </div>
       )}
       {trip.memories?.length > 0 && (
-        <div style={{ background: T.paper, border: `1px solid ${T.line}`, borderTop: "none", borderRadius: "0 0 16px 16px", padding: "22px 26px" }}>
+        <div style={{ background: R.panel2, border: `1px solid ${R.line}`, borderTop: "none", borderRadius: "0 0 16px 16px", padding: "22px 26px" }}>
           <Lbl>Core Memories This Trip Will Create</Lbl>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {trip.memories.map((m, i) => (
               <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                <div style={{ fontFamily: F.serif, fontSize: "1.2rem", color: T.accent, lineHeight: 1, flexShrink: 0, marginTop: 2, opacity: 0.55 }}>"</div>
-                <p style={{ fontFamily: F.serif, fontWeight: 400, fontSize: "0.95rem", color: T.inkSoft, lineHeight: 1.65, margin: 0 }}>{m}</p>
+                <div style={{ fontFamily: F.serif, fontSize: "1.2rem", color: R.accent, lineHeight: 1, flexShrink: 0, marginTop: 2, opacity: 0.75 }}>"</div>
+                <p style={{ fontFamily: F.serif, fontWeight: 400, fontSize: "0.95rem", color: R.textSoft, lineHeight: 1.65, margin: 0 }}>{m}</p>
               </div>
             ))}
           </div>
@@ -402,36 +390,36 @@ function TripHero({ trip }) {
 }
 
 // ── TIMELINE ───────────────────────────────────────────────────────────────────
-const TYPE_DOT = { highlight: T.accent, travel: T.teal, food: T.sage, sunset: T.terraLight, stay: T.teal, tip: T.muted, recovery: "#8a9e8c" };
+const TYPE_DOT = { highlight: R.accent, travel: R.teal, food: R.sage, sunset: R.terra, stay: R.teal, tip: R.muted, recovery: "#b0bd9b" };
 
 function Timeline({ items }) {
   if (!items?.length) return null;
   return (
     <div style={{ position: "relative", paddingLeft: 28 }}>
-      <div style={{ position: "absolute", left: 7, top: 8, bottom: 8, width: 1, background: T.lineStrong }} />
+      <div style={{ position: "absolute", left: 7, top: 8, bottom: 8, width: 1, background: R.lineStrong }} />
       {items.map((item, i) => (
         <div key={i} style={{ position: "relative", marginBottom: i < items.length - 1 ? 22 : 0 }}>
-          <div style={{ position: "absolute", left: -25, top: 4, width: 10, height: 10, borderRadius: "50%", background: TYPE_DOT[item.type] || T.accent, border: `2px solid ${T.white}`, boxShadow: "0 0 0 1px rgba(0,0,0,0.06)" }} />
-          <div style={{ fontFamily: F.mono, fontSize: "0.58rem", letterSpacing: "0.1em", color: T.muted, marginBottom: 3 }}>{item.time}</div>
+          <div style={{ position: "absolute", left: -25, top: 4, width: 10, height: 10, borderRadius: "50%", background: TYPE_DOT[item.type] || R.accent, border: `2px solid ${R.panel2}`, boxShadow: "0 0 0 1px rgba(255,255,255,0.08)" }} />
+          <div style={{ fontFamily: F.mono, fontSize: "0.58rem", letterSpacing: "0.1em", color: R.muted, marginBottom: 3 }}>{item.time}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, flexWrap: "wrap" }}>
-            <span style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.94rem", color: item.type === "sunset" ? T.terra : T.ink }}>{item.title}</span>
+            <span style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.94rem", color: item.type === "sunset" ? R.terra : R.text }}>{item.title}</span>
             {item.type === "recovery" && (
-              <Badge bg="rgba(138,158,140,0.2)" color={T.sage} style={{ border: `1px solid ${T.sage}` }}>
+              <Badge bg="rgba(176,189,155,0.16)" color={R.sage} style={{ border: `1px solid ${R.sage}` }}>
                 Recovery
               </Badge>
             )}
             {item.mustDo && (
-              <Badge bg={T.terra} color={T.white}>
+              <Badge bg={R.terra} color={R.bg}>
                 Must Do
               </Badge>
             )}
             {item.type === "sunset" && (
-              <Badge bg={T.terraBg} color={T.terra} style={{ border: `1px solid rgba(184,74,50,0.45)` }}>
+              <Badge bg={R.terraBg} color={R.terra} style={{ border: `1px solid rgba(223,129,93,0.45)` }}>
                 Sunset
               </Badge>
             )}
           </div>
-          {item.desc && <p style={{ fontFamily: F.sans, fontSize: "0.86rem", color: T.muted, lineHeight: 1.75, margin: 0 }}>{item.desc}</p>}
+          {item.desc && <p style={{ fontFamily: F.sans, fontSize: "0.86rem", color: R.muted, lineHeight: 1.75, margin: 0 }}>{item.desc}</p>}
         </div>
       ))}
     </div>
@@ -442,7 +430,7 @@ function Timeline({ items }) {
 function DayCard({ day, defaultOpen = false }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <div className="print-day" style={{ background: T.white, border: `1px solid ${T.line}`, borderRadius: 16, marginBottom: 14, overflow: "hidden", boxShadow: "0 6px 24px rgba(26,25,23,0.05)" }}>
+    <div className="print-day" style={{ background: R.panel2, border: `1px solid ${R.line}`, borderRadius: 16, marginBottom: 14, overflow: "hidden", boxShadow: "0 10px 28px rgba(0,0,0,0.22)" }}>
       <div
         className="sq-day-head"
         onClick={() => setOpen((o) => !o)}
@@ -451,22 +439,22 @@ function DayCard({ day, defaultOpen = false }) {
           cursor: "pointer",
           position: "relative",
           transition: "background .15s",
-          borderBottom: open ? `1px solid ${T.line}` : "none",
-          background: open ? T.shell : T.white,
+          borderBottom: open ? `1px solid ${R.line}` : "none",
+          background: open ? R.panel3 : R.panel2,
         }}
       >
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 6 }}>
-          <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "1.2rem", color: T.ink, textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.2 }}>{day.place || day.title}</div>
-          <div style={{ fontFamily: F.mono, fontSize: "0.5rem", color: T.accent, letterSpacing: "0.2em", flexShrink: 0, marginLeft: 14, marginTop: 4 }}>DAY {day.dayNumber}</div>
+          <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "1.2rem", color: R.text, textTransform: "uppercase", letterSpacing: "0.08em", lineHeight: 1.2 }}>{day.place || day.title}</div>
+          <div style={{ fontFamily: F.mono, fontSize: "0.5rem", color: R.accent, letterSpacing: "0.2em", flexShrink: 0, marginLeft: 14, marginTop: 4 }}>DAY {day.dayNumber}</div>
         </div>
         {day.place && day.title && day.place !== day.title && (
-          <div style={{ fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, fontSize: "0.88rem", color: T.terra, marginBottom: 5, opacity: 0.9 }}>{day.title}</div>
+          <div style={{ fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, fontSize: "0.88rem", color: R.terra, marginBottom: 5, opacity: 0.9 }}>{day.title}</div>
         )}
-        <div style={{ fontFamily: F.sans, fontSize: "0.82rem", color: T.muted, lineHeight: 1.55 }}>{day.subtitle}</div>
-        <div style={{ position: "absolute", right: 20, top: 22, fontFamily: F.mono, fontSize: "0.6rem", color: T.lineStrong }}>{open ? "↑" : "↓"}</div>
+        <div style={{ fontFamily: F.sans, fontSize: "0.82rem", color: R.muted, lineHeight: 1.55 }}>{day.subtitle}</div>
+        <div style={{ position: "absolute", right: 20, top: 22, fontFamily: F.mono, fontSize: "0.6rem", color: R.lineStrong }}>{open ? "↑" : "↓"}</div>
       </div>
       {open && (
-        <div style={{ padding: "22px", background: T.white }}>
+        <div style={{ padding: "22px", background: R.panel2 }}>
           {day.timeline?.length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <Lbl>Day Schedule</Lbl>
@@ -479,8 +467,8 @@ function DayCard({ day, defaultOpen = false }) {
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {day.food.map((f, i) => (
                   <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-                    <span style={{ color: T.accent, fontFamily: F.mono, fontSize: "0.65rem", flexShrink: 0, marginTop: 3 }}>◆</span>
-                    <p style={{ fontFamily: F.sans, fontSize: "0.87rem", color: T.inkSoft, lineHeight: 1.65, margin: 0 }}>{f}</p>
+                    <span style={{ color: R.accent, fontFamily: F.mono, fontSize: "0.65rem", flexShrink: 0, marginTop: 3 }}>◆</span>
+                    <p style={{ fontFamily: F.sans, fontSize: "0.87rem", color: R.textSoft, lineHeight: 1.65, margin: 0 }}>{f}</p>
                   </div>
                 ))}
               </div>
@@ -489,9 +477,9 @@ function DayCard({ day, defaultOpen = false }) {
           {day.stay && (
             <div style={{ marginBottom: 22 }}>
               <Lbl>Where to Stay</Lbl>
-              <div style={{ background: T.shell, border: `1px solid ${T.line}`, borderRadius: 12, padding: "15px 17px" }}>
-                <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "0.95rem", color: T.ink, marginBottom: 8 }}>{day.stay.locality}</div>
-                {day.stay.why && <p style={{ fontFamily: F.sans, fontSize: "0.86rem", color: T.inkSoft, lineHeight: 1.75, marginBottom: 10 }}>{day.stay.why}</p>}
+              <div style={{ background: R.panel3, border: `1px solid ${R.line}`, borderRadius: 12, padding: "15px 17px" }}>
+                <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "0.95rem", color: R.text, marginBottom: 8 }}>{day.stay.locality}</div>
+                {day.stay.why && <p style={{ fontFamily: F.sans, fontSize: "0.86rem", color: R.textSoft, lineHeight: 1.75, marginBottom: 10 }}>{day.stay.why}</p>}
                 <WhyBlock label="Why not the tourist strip" text={day.stay.notWhere} />
               </div>
             </div>
@@ -511,7 +499,7 @@ function DayCard({ day, defaultOpen = false }) {
             </div>
           ) : null}
           {day.budget && (
-            <div style={{ fontFamily: F.mono, fontSize: "0.68rem", color: T.terra, marginTop: 4 }}>
+            <div style={{ fontFamily: F.mono, fontSize: "0.68rem", color: R.terra, marginTop: 4 }}>
               <span style={{ opacity: 0.55, marginRight: 6 }}>Day budget</span>
               {day.budget}
             </div>
@@ -523,17 +511,54 @@ function DayCard({ day, defaultOpen = false }) {
 }
 
 // ── OUTRO ──────────────────────────────────────────────────────────────────────
+function FoodMap({ foodMap }) {
+  if (!foodMap?.length) return null;
+  return (
+    <div style={{ marginTop: 34, marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "0 0 18px" }}>
+        <div style={{ flex: 1, height: 1, background: R.line }} />
+        <div style={{ fontFamily: F.mono, fontSize: "0.48rem", letterSpacing: "0.28em", color: R.muted, textTransform: "uppercase" }}>Food Map</div>
+        <div style={{ flex: 1, height: 1, background: R.line }} />
+      </div>
+      <div style={{ display: "grid", gap: 14 }}>
+        {foodMap.map((group, i) => (
+          <div key={i} style={{ background: R.panel2, border: `1px solid ${R.line}`, borderRadius: 16, padding: "20px 22px", boxShadow: "0 10px 28px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "1.15rem", color: R.text, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 14 }}>
+              Where to Eat in {group.place || "This Route"}
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              {(group.spots || []).map((spot, j) => {
+                const title = typeof spot === "string" ? spot : spot.name;
+                const detail = typeof spot === "string" ? "" : [spot.order, spot.bestFor, spot.why].filter(Boolean).join(" — ");
+                return (
+                  <div key={j} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "10px 0", borderTop: j === 0 ? "none" : `1px solid ${R.line}` }}>
+                    <span style={{ color: R.accent, fontFamily: F.mono, fontSize: "0.65rem", flexShrink: 0, marginTop: 4 }}>◆</span>
+                    <div>
+                      <div style={{ fontFamily: F.sans, fontWeight: 700, fontSize: "0.9rem", color: R.text }}>{title}</div>
+                      {detail && <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: R.muted, lineHeight: 1.65, margin: "4px 0 0" }}>{detail}</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Outro({ budget, different, packing }) {
   return (
     <div className="sq-outro" style={{ marginTop: 40 }}>
       {budget && (
-        <div style={{ background: T.white, border: `1px solid ${T.line}`, borderRadius: 16, padding: 26, marginBottom: 16, boxShadow: "0 6px 24px rgba(26,25,23,0.05)" }}>
+        <div style={{ background: R.panel2, border: `1px solid ${R.line}`, borderRadius: 16, padding: 26, marginBottom: 16, boxShadow: "0 10px 28px rgba(0,0,0,0.2)" }}>
           <Lbl>Budget Breakdown — Per Person</Lbl>
           <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: F.mono, fontSize: "0.8rem" }}>
             <thead>
               <tr>
                 {["Category", "Amount", "Notes"].map((h, i) => (
-                  <th key={i} style={{ background: T.accentSoft, color: T.accent, padding: "10px 13px", textAlign: "left", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", whiteSpace: "nowrap", fontWeight: 700 }}>
+                  <th key={i} style={{ background: R.accentSoft, color: R.accent, padding: "10px 13px", textAlign: "left", fontSize: "0.55rem", letterSpacing: "0.14em", textTransform: "uppercase", whiteSpace: "nowrap", fontWeight: 700 }}>
                     {h}
                   </th>
                 ))}
@@ -544,39 +569,39 @@ function Outro({ budget, different, packing }) {
                 .filter(([k]) => k !== "total")
                 .map(([key, val], i) => (
                   <tr key={i}>
-                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${T.line}`, color: T.inkSoft, textTransform: "capitalize" }}>{key}</td>
-                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${T.line}`, color: T.terra, whiteSpace: "nowrap" }}>{val?.amount}</td>
-                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${T.line}`, color: T.muted, fontSize: "0.74rem" }}>{val?.note}</td>
+                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${R.line}`, color: R.textSoft, textTransform: "capitalize" }}>{key}</td>
+                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${R.line}`, color: R.terra, whiteSpace: "nowrap" }}>{val?.amount}</td>
+                    <td style={{ padding: "9px 13px", borderBottom: `1px solid ${R.line}`, color: R.muted, fontSize: "0.74rem" }}>{val?.note}</td>
                   </tr>
                 ))}
               <tr>
-                <td colSpan={2} style={{ padding: "11px 13px", borderTop: `2px solid ${T.accent}`, color: T.accent, fontWeight: 700, fontSize: "0.88rem" }}>
+                <td colSpan={2} style={{ padding: "11px 13px", borderTop: `2px solid ${R.accent}`, color: R.accent, fontWeight: 700, fontSize: "0.88rem" }}>
                   Total
                 </td>
-                <td style={{ padding: "11px 13px", borderTop: `2px solid ${T.accent}`, color: T.accent, fontWeight: 700, fontSize: "0.88rem" }}>{budget.total}</td>
+                <td style={{ padding: "11px 13px", borderTop: `2px solid ${R.accent}`, color: R.accent, fontWeight: 700, fontSize: "0.88rem" }}>{budget.total}</td>
               </tr>
             </tbody>
           </table>
         </div>
       )}
       {different?.length > 0 && (
-        <div style={{ background: T.accentSoft, border: `1px solid rgba(201,84,32,0.25)`, borderRadius: 16, padding: 26, marginBottom: 16 }}>
-          <Lbl color={T.accent}>What Makes This Trip Different</Lbl>
+        <div style={{ background: R.accentSoft, border: `1px solid rgba(215,101,45,0.25)`, borderRadius: 16, padding: 26, marginBottom: 16 }}>
+          <Lbl color={R.accent}>What Makes This Trip Different</Lbl>
           {different.map((d, i) => (
-            <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "9px 0", borderBottom: i < different.length - 1 ? `1px solid rgba(201,84,32,0.15)` : "none" }}>
-              <span style={{ color: T.accent, fontFamily: F.mono, fontSize: "0.62rem", flexShrink: 0, marginTop: 3 }}>→</span>
-              <p style={{ fontFamily: F.sans, fontSize: "0.88rem", color: T.inkSoft, lineHeight: 1.7, margin: 0 }}>{d}</p>
+            <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", padding: "9px 0", borderBottom: i < different.length - 1 ? `1px solid rgba(215,101,45,0.18)` : "none" }}>
+              <span style={{ color: R.accent, fontFamily: F.mono, fontSize: "0.62rem", flexShrink: 0, marginTop: 3 }}>→</span>
+              <p style={{ fontFamily: F.sans, fontSize: "0.88rem", color: R.textSoft, lineHeight: 1.7, margin: 0 }}>{d}</p>
             </div>
           ))}
         </div>
       )}
       {packing?.length > 0 && (
-        <div style={{ background: T.white, border: `1px solid ${T.line}`, borderRadius: 16, padding: "24px 26px", boxShadow: "0 6px 24px rgba(26,25,23,0.05)" }}>
+        <div style={{ background: R.panel2, border: `1px solid ${R.line}`, borderRadius: 16, padding: "24px 26px", boxShadow: "0 10px 28px rgba(0,0,0,0.2)" }}>
           <Lbl>Pack for This Specific Trip</Lbl>
           {packing.map((p, i) => (
             <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
-              <span style={{ color: T.accent, fontFamily: F.mono, fontSize: "0.6rem", flexShrink: 0, marginTop: 3 }}>◆</span>
-              <p style={{ fontFamily: F.sans, fontSize: "0.85rem", color: T.inkSoft, lineHeight: 1.7, margin: 0 }}>{p}</p>
+              <span style={{ color: R.accent, fontFamily: F.mono, fontSize: "0.6rem", flexShrink: 0, marginTop: 3 }}>◆</span>
+              <p style={{ fontFamily: F.sans, fontSize: "0.85rem", color: R.textSoft, lineHeight: 1.7, margin: 0 }}>{p}</p>
             </div>
           ))}
         </div>
@@ -596,7 +621,7 @@ function RefinePanel({ trip, form, onUpdate }) {
     if (!req.trim() || loading) return;
     setLoading(true); setErr(""); setLastChange("");
     try {
-      const tripContext = `${form.people} people, ${form.travelMode}, ${form.currencySymbol}${form.budget}/person, ${form.dateFrom || ""} to ${form.dateTo || ""}${form.prioritizeWomensSafety ? ", women's safety prioritized" : ""}`;
+      const tripContext = `${form.people} people, ${form.travelMode}, ${form.budget}/person, ${form.dateFrom || ""} to ${form.dateTo || ""}${form.prioritizeWomensSafety ? ", women's safety prioritized" : ""}`;
       const res = await fetch("/api/refine", {
         method:"POST", headers:{"Content-Type":"application/json"},
         body: JSON.stringify({ trip, request:req, tripContext }),
@@ -613,9 +638,9 @@ function RefinePanel({ trip, form, onUpdate }) {
   };
 
   return (
-    <div className="sq-refine" style={{ marginTop: 32, background: T.white, border: `1px solid ${T.line}`, borderRadius: 16, padding: "28px 26px", boxShadow: "0 6px 24px rgba(26,25,23,0.05)" }}>
+    <div className="sq-refine" style={{ marginTop: 32, background: R.panel2, border: `1px solid ${R.line}`, borderRadius: 16, padding: "28px 26px", boxShadow: "0 10px 28px rgba(0,0,0,0.2)" }}>
       <Lbl>Refine Your Trip</Lbl>
-      <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: T.muted, marginBottom: 18, lineHeight: 1.65 }}>
+      <p style={{ fontFamily: F.sans, fontSize: "0.84rem", color: R.muted, marginBottom: 18, lineHeight: 1.65 }}>
         Add nightlife · Make it more relaxed · Swap a day for hiking · Add photography spots · Avoid crowded places · Increase budget slightly
       </p>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -628,10 +653,10 @@ function RefinePanel({ trip, form, onUpdate }) {
           style={{
             flex: 1,
             minWidth: 200,
-            background: T.shell,
-            border: `1px solid ${T.line}`,
+            background: R.panel3,
+            border: `1px solid ${R.line}`,
             borderRadius: 12,
-            color: T.ink,
+            color: R.text,
             fontFamily: F.sans,
             fontSize: "0.9rem",
             padding: "12px 16px",
@@ -642,9 +667,9 @@ function RefinePanel({ trip, form, onUpdate }) {
           onClick={refine}
           disabled={loading}
           style={{
-            background: loading ? "rgba(201,84,32,0.45)" : T.accent,
+            background: loading ? "rgba(215,101,45,0.45)" : R.accent,
             border: "none",
-            color: T.white,
+            color: R.bg,
             fontFamily: F.mono,
             fontSize: "0.6rem",
             letterSpacing: "0.12em",
@@ -659,9 +684,9 @@ function RefinePanel({ trip, form, onUpdate }) {
           {loading ? "REFINING…" : "REFINE →"}
         </button>
       </div>
-      {err && <div style={{ fontFamily: F.mono, fontSize: "0.62rem", color: T.terra, marginTop: 10 }}>{err}</div>}
+      {err && <div style={{ fontFamily: F.mono, fontSize: "0.62rem", color: R.terra, marginTop: 10 }}>{err}</div>}
       {lastChange && !loading && (
-        <div style={{ fontFamily: F.mono, fontSize: "0.6rem", color: T.sage, marginTop: 10, opacity: 0.9 }}>
+        <div style={{ fontFamily: F.mono, fontSize: "0.6rem", color: R.sage, marginTop: 10, opacity: 0.9 }}>
           ✓ Applied: "{lastChange}"
         </div>
       )}
@@ -698,63 +723,6 @@ function IconTag() {
       <path d="M12 2H2v10l10 10 10-10L12 2z" />
       <circle cx="7" cy="7" r="1.2" fill={T.muted} stroke="none" />
     </svg>
-  );
-}
-
-function FeaturedSidebar() {
-  return (
-    <div style={{ padding: "28px 24px", background: T.shell }}>
-      <div style={{ fontFamily: F.mono, fontSize: "0.5rem", letterSpacing: "0.28em", color: T.muted, textTransform: "uppercase", marginBottom: 18 }}>
-        Featured
-      </div>
-      {FEATURED.map((f) => (
-        <div
-          key={f.country}
-          style={{
-            position: "relative",
-            borderRadius: 18,
-            overflow: "hidden",
-            marginBottom: 14,
-            minHeight: 132,
-            backgroundImage: `linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.55) 100%), url(${f.img})`,
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-            cursor: "default",
-          }}
-        >
-          <div style={{ position: "absolute", top: 12, right: 12 }}>
-            <span style={{ fontFamily: F.mono, fontSize: "0.45rem", letterSpacing: "0.14em", color: T.white, background: "rgba(0,0,0,0.35)", padding: "4px 10px", borderRadius: 999, textTransform: "uppercase" }}>Featured</span>
-          </div>
-          <div style={{ position: "absolute", left: 14, top: 14, right: 72 }}>
-            <div style={{ fontFamily: F.serif, fontWeight: 700, fontSize: "1.35rem", color: T.white, letterSpacing: "0.06em", lineHeight: 1.1 }}>{f.country}</div>
-            <div style={{ fontFamily: F.serif, fontStyle: "italic", fontSize: "0.78rem", color: "rgba(255,255,255,0.88)", marginTop: 4 }}>{f.tagline}</div>
-          </div>
-          <div style={{ position: "absolute", left: 14, right: 14, bottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-            <span style={{ fontFamily: F.sans, fontSize: "0.62rem", letterSpacing: "0.12em", color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>{f.meta}</span>
-            <button
-              type="button"
-              style={{
-                fontFamily: F.sans,
-                fontSize: "0.62rem",
-                fontWeight: 600,
-                letterSpacing: "0.06em",
-                color: T.white,
-                background: "rgba(0,0,0,0.45)",
-                border: "1px solid rgba(255,255,255,0.25)",
-                borderRadius: 999,
-                padding: "7px 12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              View trip <span aria-hidden>→</span>
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }
 
@@ -866,8 +834,6 @@ function Form({ form, onChange, onSubmit, err }) {
     transition: "all .2s",
   });
 
-  const nav = ["Trips", "Routes", "Experiences", "Journal", "About"];
-
   return (
     <div style={{ fontFamily: F.sans, minHeight: "100vh", position: "relative" }}>
       <div
@@ -886,75 +852,17 @@ function Form({ form, onChange, onSubmit, err }) {
         <div
           style={{
             width: "100%",
-            maxWidth: 1100,
+            maxWidth: 640,
             background: T.paper,
             borderRadius: 28,
             boxShadow: "0 32px 100px rgba(0,0,0,0.28)",
             overflow: "hidden",
-            display: "grid",
-            gridTemplateColumns: "1fr",
-            gridTemplateAreas: '"main" "feat"',
+            display: "block",
           }}
-          className="sq-landing-grid"
         >
-          <style>{`
-            @media (min-width: 960px) {
-              .sq-landing-grid {
-                grid-template-columns: 272px 1fr !important;
-                grid-template-areas: "feat main" !important;
-              }
-            }
-          `}</style>
+          <main style={{ padding: "36px 28px 38px", background: T.paper }}>
 
-          <aside
-            style={{
-              gridArea: "feat",
-              borderBottom: `1px solid ${T.line}`,
-              background: T.shell,
-            }}
-            className="sq-feat-aside"
-          >
-            <style>{`
-              @media (min-width: 960px) {
-                .sq-feat-aside { border-bottom: none !important; border-right: 1px solid ${T.line} !important; }
-              }
-            `}</style>
-            <FeaturedSidebar />
-          </aside>
-
-          <main style={{ gridArea: "main", padding: "32px 28px 36px", background: T.paper }}>
-            <nav style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 12 }}>
-              <CompassStar size={22} color={T.accent} />
-              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", justifyContent: "center" }}>
-                {nav.map((n) => (
-                  <a
-                    key={n}
-                    href="#"
-                    onClick={(e) => e.preventDefault()}
-                    style={{
-                      fontFamily: F.sans,
-                      fontSize: "0.62rem",
-                      fontWeight: 700,
-                      letterSpacing: "0.2em",
-                      textTransform: "uppercase",
-                      color: n === "Trips" ? T.accent : T.muted,
-                      textDecoration: "none",
-                    }}
-                  >
-                    {n}
-                  </a>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ width: 34, height: 34, borderRadius: "50%", border: `1px solid ${T.line}`, background: T.white }} />
-                <div style={{ width: 22, display: "flex", flexDirection: "column", gap: 5 }}>
-                  <span style={{ height: 2, background: T.ink, borderRadius: 1, opacity: 0.35 }} />
-                  <span style={{ height: 2, background: T.ink, borderRadius: 1, opacity: 0.35 }} />
-                </div>
-              </div>
-            </nav>
-
-            <div style={{ textAlign: "center", marginTop: 16, marginBottom: 8 }}>
+            <div style={{ textAlign: "center", marginTop: 4, marginBottom: 8 }}>
               <Wordmark />
             </div>
 
@@ -1002,25 +910,13 @@ function Form({ form, onChange, onSubmit, err }) {
                 </div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
-                <div>
-                  <label style={lbl}>People</label>
-                  <div style={wrap}>
-                    <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
-                      <IconUsers />
-                    </span>
-                    <input className="sq-input" style={inp} type="number" placeholder="2" value={form.people} onChange={(e) => s("people", e.target.value)} />
-                  </div>
-                </div>
-                <div>
-                  <label style={lbl}>Currency</label>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                    {CURRENCIES.map((c) => (
-                      <button key={c.code} type="button" onClick={() => onChange({ currency: c.code, currencySymbol: c.symbol })} style={pillBtn(form.currency === c.code)}>
-                        {c.code}
-                      </button>
-                    ))}
-                  </div>
+              <div style={{ marginBottom: 18 }}>
+                <label style={lbl}>People</label>
+                <div style={wrap}>
+                  <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
+                    <IconUsers />
+                  </span>
+                  <input className="sq-input" style={inp} type="number" placeholder="2" value={form.people} onChange={(e) => s("people", e.target.value)} />
                 </div>
               </div>
 
@@ -1030,7 +926,7 @@ function Form({ form, onChange, onSubmit, err }) {
                   <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
                     <IconTag />
                   </span>
-                  <input className="sq-input" style={inp} type="text" placeholder={`${form.currencySymbol}25,000`} value={form.budget} onChange={(e) => s("budget", e.target.value)} />
+                  <input className="sq-input" style={inp} type="text" placeholder="₹25,000 / $800 / 600 euros" value={form.budget} onChange={(e) => s("budget", e.target.value)} />
                 </div>
               </div>
 
@@ -1155,7 +1051,25 @@ function Form({ form, onChange, onSubmit, err }) {
 function Result({ trip, setTrip, form, onReset }) {
   const handleExport = () => window.print();
   return (
-    <div id="sq-result" style={{ background: T.shell, minHeight: "100vh", fontFamily: F.sans }}>
+    <div
+      id="sq-result"
+      style={{
+        background: R.bg,
+        minHeight: "100vh",
+        fontFamily: F.sans,
+        "--sq-label": R.muted,
+        "--sq-accent": R.accent,
+        "--sq-accent-soft": R.accentSoft,
+        "--sq-text-soft": R.textSoft,
+        "--sq-sage": R.sage,
+        "--sq-sage-bg": R.sageBg,
+        "--sq-teal": R.teal,
+        "--sq-teal-bg": R.tealBg,
+        "--sq-terra": R.terra,
+        "--sq-terra-bg": R.terraBg,
+        "--sq-day-hover": R.panel3,
+      }}
+    >
       <div
         style={{
           position: "fixed",
@@ -1164,23 +1078,24 @@ function Result({ trip, setTrip, form, onReset }) {
           backgroundSize: "cover",
           backgroundPosition: "center",
           zIndex: 0,
-          opacity: 0.22,
+          opacity: 0.18,
         }}
       />
+      <div style={{ position: "fixed", inset: 0, background: "linear-gradient(180deg, rgba(8,7,5,0.8), rgba(8,7,5,0.96))", zIndex: 0 }} />
       <div style={{ position: "relative", zIndex: 1, padding: "24px 18px 72px" }}>
         <div
           style={{
             maxWidth: 860,
             margin: "0 auto",
-            background: T.paper,
+            background: R.panel,
             borderRadius: 28,
-            boxShadow: "0 24px 80px rgba(0,0,0,0.12)",
-            border: `1px solid ${T.line}`,
+            boxShadow: "0 26px 90px rgba(0,0,0,0.42)",
+            border: `1px solid ${R.line}`,
             padding: "28px 26px 40px",
           }}
         >
-          <div className="np" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, paddingBottom: 18, borderBottom: `1px solid ${T.line}`, flexWrap: "wrap", gap: 14 }}>
-            <Wordmark size="small" />
+          <div className="np" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, paddingBottom: 18, borderBottom: `1px solid ${R.line}`, flexWrap: "wrap", gap: 14 }}>
+            <Wordmark size="small" light />
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               <button
                 type="button"
@@ -1189,9 +1104,9 @@ function Result({ trip, setTrip, form, onReset }) {
                   fontFamily: F.mono,
                   fontSize: "0.56rem",
                   letterSpacing: "0.12em",
-                  background: T.white,
-                  border: `1px solid ${T.accent}`,
-                  color: T.accent,
+                  background: R.panel2,
+                  border: `1px solid ${R.accent}`,
+                  color: R.accent,
                   padding: "10px 18px",
                   borderRadius: 999,
                   cursor: "pointer",
@@ -1204,9 +1119,9 @@ function Result({ trip, setTrip, form, onReset }) {
                 type="button"
                 onClick={onReset}
                 style={{
-                  background: T.shell,
-                  border: `1px solid ${T.line}`,
-                  color: T.muted,
+                  background: R.panel2,
+                  border: `1px solid ${R.line}`,
+                  color: R.muted,
                   fontFamily: F.mono,
                   fontSize: "0.56rem",
                   letterSpacing: "0.1em",
@@ -1222,13 +1137,14 @@ function Result({ trip, setTrip, form, onReset }) {
           </div>
           <TripHero trip={trip} />
           <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "32px 0 22px" }}>
-            <div style={{ flex: 1, height: 1, background: T.line }} />
-            <div style={{ fontFamily: F.mono, fontSize: "0.48rem", letterSpacing: "0.28em", color: T.muted, textTransform: "uppercase" }}>Day by day</div>
-            <div style={{ flex: 1, height: 1, background: T.line }} />
+            <div style={{ flex: 1, height: 1, background: R.line }} />
+            <div style={{ fontFamily: F.mono, fontSize: "0.48rem", letterSpacing: "0.28em", color: R.muted, textTransform: "uppercase" }}>Day by day</div>
+            <div style={{ flex: 1, height: 1, background: R.line }} />
           </div>
           {trip.days?.map((day, i) => (
             <DayCard key={i} day={day} defaultOpen={i === 0} />
           ))}
+          <FoodMap foodMap={trip.foodMap} />
           <Outro budget={trip.costs} different={trip.differentiators} packing={trip.packing} />
           <RefinePanel trip={trip} form={form} onUpdate={setTrip} />
         </div>
@@ -1258,8 +1174,6 @@ export default function SideQuest() {
     people: "2",
     budget: "",
     preferences: "",
-    currency: "INR",
-    currencySymbol: "₹",
     prioritizeWomensSafety: false,
   });
   const [phase, setPhase] = useState("form");

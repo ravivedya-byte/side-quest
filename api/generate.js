@@ -92,7 +92,9 @@ Every insight must be named and specific. No generic advice.
 
 SOURCE BIAS: Prioritize the kind of intelligence found in Reddit travel communities, long-form travel blogs, and local forum threads. Deprioritize generic aggregator listicles and SEO "top 10" advice.
 
-DEEPSEEK-ONLY MODE: You do not have live web search here. Use best-known travel intelligence, but do not pretend certainty about current prices, closures, or exact operating schedules. Still be as specific and practical as possible.`;
+DEEPSEEK-ONLY MODE: You do not have live web search here. Use best-known travel intelligence, but do not pretend certainty about current prices, closures, or exact operating schedules. Still be as specific and practical as possible.
+
+FOOD + ACTIVITY DEPTH: Put extra effort into named restaurants, dishes, cafes, market stalls, homestay meals, and lesser-known activities that forum-style travellers would discuss.`;
 
 function buildStage1Prompt(form) {
   const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
@@ -103,7 +105,7 @@ function buildStage1Prompt(form) {
 Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
 Preferences: ${form.preferences}${safety}
 
-Research angles to infer: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings
+Research angles to infer: (1) seasonal conditions ${month} (2) best neighbourhoods local advice (3) crowd hacks exact timings (4) restaurant/cafe variety (5) lesser-known things to do
 
 Return ONLY JSON:
 {"season_notes":"specific to this destination in ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order"],"transport_notes":"specific advice","seasonal_warnings":["specific to ${month}"],"local_timing":"daily rhythms specific to destination"}`;
@@ -237,11 +239,13 @@ OUTPUT COMPRESSION — MANDATORY HARD LIMITS:
 - warnings[]: max 15 words each
 - stay.why: max 30 words
 - stay.notWhere: ONE sentence, max 24 words, direct comparison
-- differentiators[]: max 20 words each, specific and opinionated
+- differentiators[]: max 30 words each, specific and opinionated
 - packing[]: max 12 words each
 - food[]: max 20 words each — named place + dish + why
+- foodMap[].spots[]: max 3-5 spots per place; each spot can be richer than daily food but must remain practical
 
 FOOD: Every day needs 2-3 named food spots with specific dishes. Not "try local cuisine."
+FOOD MAP: Add a separate foodMap grouped by place. Each major place gets 3-5 named restaurants/cafes/stalls with what to order, bestFor, and why. Avoid repeating the same restaurant across multiple days unless it truly earns repeat visits.
 
 GEOGRAPHIC FLOW — MANDATORY: Every day has exactly two non-negotiable anchors scheduled first:
 ANCHOR 1 — SUNSET: (as above)
@@ -271,13 +275,13 @@ function buildStage2Prompt(form, intelligence, conf) {
   return `RESEARCH INTELLIGENCE (${conf.grade} confidence, ${conf.score}/${conf.maxScore}):
 ${JSON.stringify(intelligence)}
 
-TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
+TRIP: ${form.destinations} from ${form.departure} | ${dateStr} | ${form.people} people | Budget: ${form.budget} per person
 ${transportNote}
 Preferences: ${form.preferences}
 ${safetyNote}
 ${qualityNote}
 
-RULES: Conscious pace — respect max 3 major activities/day, mandatory recovery after intense mornings, Must-Do coverage per place, held-and-deep brand above. Sunset in timeline only (one sunset row per day). Specific locality + why for every stay. Use research intel — real places, real timings. Preferences shape the entire arc. Use ${form.currencySymbol || "₹"} for ALL monetary values. Never mix currencies.
+RULES: Conscious pace — respect max 3 major activities/day, mandatory recovery after intense mornings, Must-Do coverage per place, held-and-deep brand above. Sunset in timeline only (one sunset row per day). Specific locality + why for every stay. Use research intel — real places, real timings. Preferences shape the entire arc. Infer currency from the budget text and use that currency consistently for ALL monetary values.
 
 Return ONLY this compressed JSON (respect ALL word limits above):
 {
@@ -301,8 +305,9 @@ Return ONLY this compressed JSON (respect ALL word limits above):
     "warnings":["≤15 words"],
     "budget":"X/person"
   }],
+  "foodMap":[{"place":"actual place name","spots":[{"name":"Named Place","order":"specific dish/order","bestFor":"breakfast|lunch|dinner|coffee|snack|local meal","why":"specific reason this belongs"}]}],
   "costs":{"transport":{"amount":"X","note":"brief"},"accommodation":{"amount":"X","note":"brief"},"food":{"amount":"X","note":"brief"},"activities":{"amount":"X","note":"brief"},"misc":{"amount":"X","note":"brief"},"total":"X/person"},
-  "differentiators":["≤20 words each — specific and opinionated"],
+  "differentiators":["≤30 words each — specific and opinionated"],
   "packing":["≤12 words each"]
 }`;
 }
