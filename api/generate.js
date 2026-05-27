@@ -490,8 +490,85 @@ Return ONLY a JSON array of day objects — no markdown, no backticks, no explan
 }]`;
 }
 
+/** Strip web-search cite markup and other non-JSON noise before parsing. */
+function sanitiseModelJson(txt) {
+  return String(txt || "")
+    .replace(/<cite[^>]*>/gi, "")
+    .replace(/<\/cite>/gi, "")
+    .replace(/\u201c|\u201d/g, '"')
+    .replace(/\u2018|\u2019/g, "'")
+    .trim();
+}
+
+/** Extract and parse the first complete JSON object or array in messy model output. */
+function extractBalancedJson(raw) {
+  const s = sanitiseModelJson(raw);
+  const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fenced ? fenced[1].trim() : s;
+  const start = candidate.search(/[\[{]/);
+  if (start < 0) throw new Error("No JSON object or array found");
+
+  const body = candidate.slice(start);
+  const stack = [];
+  let inString = false;
+  let escape = false;
+
+  for (let i = 0; i < body.length; i++) {
+    const c = body[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (c === "\\") escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === "{") stack.push("}");
+    else if (c === "[") stack.push("]");
+    else if ((c === "}" || c === "]") && stack.length) {
+      if (c !== stack[stack.length - 1]) continue;
+      stack.pop();
+      if (stack.length === 0) return JSON.parse(body.slice(0, i + 1));
+    }
+  }
+  throw new Error("Truncated or unbalanced JSON");
+}
+
 function parseJsonText(txt) {
-  return JSON.parse(txt.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim());
+  try {
+    return extractBalancedJson(txt);
+  } catch {
+    const trimmed = sanitiseModelJson(txt)
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    return JSON.parse(trimmed);
+  }
+}
+
+function hasUsableIntelligence(intel) {
+  return intel && typeof intel === "object" && Object.keys(intel).length >= 3;
+}
+
+async function callAnthropic(body) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    const msg = data?.error?.message || `Anthropic API ${response.status}`;
+    throw new Error(msg);
+  }
+  return data;
+}
+
+function textFromResponse(data) {
+  return (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
 }
 
 export default async function handler(req, res) {
@@ -526,27 +603,30 @@ export default async function handler(req, res) {
 
     // ── STAGE 1: Research ─────────────────────────────────────
     if (!cacheHit) {
-      console.log(`[S1] Researching: ${form.destinations}`);
-      const s1Res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
+      const runStage1 = async () => {
+        console.log(`[S1] Researching: ${form.destinations}`);
+        const s1Data = await callAnthropic({
           model: "claude-haiku-4-5",
           max_tokens: 1200,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
-          system: "You are a compact travel intelligence extractor. Run maximum 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks. Every insight must be named and specific. No generic advice.",
+          system: "You are a compact travel intelligence extractor. Run maximum 3 web searches. Your entire reply must be one raw JSON object starting with { — no introduction, no markdown fences, no backticks, no <cite> tags. Plain JSON only.",
           messages: [{ role: "user", content: buildStage1Prompt(form) }],
-        }),
-      });
-      const s1Data = await s1Res.json();
-      console.log(`[S1] tokens: in:${s1Data.usage?.input_tokens} out:${s1Data.usage?.output_tokens}`);
+        });
+        console.log(`[S1] tokens: in:${s1Data.usage?.input_tokens} out:${s1Data.usage?.output_tokens} stop:${s1Data.stop_reason}`);
+        const txt = textFromResponse(s1Data);
+        return parseJsonText(txt);
+      };
 
-      if (s1Data.content) {
-        const txt = s1Data.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+      try {
+        intelligence = await runStage1();
+      } catch (e) {
+        console.error("[S1 parse error]", e.message);
+        await new Promise((r) => setTimeout(r, 800));
         try {
-          intelligence = parseJsonText(txt);
-        } catch (e) {
-          console.error("[S1 parse error]", txt.slice(0, 200));
+          intelligence = await runStage1();
+          console.log("[S1] recovered on retry");
+        } catch (e2) {
+          console.error("[S1 retry failed]", e2.message);
         }
       }
 
@@ -558,23 +638,18 @@ export default async function handler(req, res) {
       if (conf.grade === "low") {
         const fbQuery = buildFallbackQuery(form.destinations, conf.weakAreas);
         console.log(`[Fallback] query: "${fbQuery}"`);
-        const fbRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            model: "claude-haiku-4-5",
-            max_tokens: 700,
-            tools: [{ type: "web_search_20250305", name: "web_search" }],
-            system: "Run ONE targeted web search. Return compact JSON only — no prose.",
-            messages: [{
-              role: "user",
-              content: `Search: "${fbQuery}"\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}`,
-            }],
-          }),
+        const fbData = await callAnthropic({
+          model: "claude-haiku-4-5",
+          max_tokens: 700,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          system: "Run ONE targeted web search. Reply with raw JSON only — no prose, markdown, or cite tags.",
+          messages: [{
+            role: "user",
+            content: `Search: "${fbQuery}"\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}`,
+          }],
         });
-        const fbData = await fbRes.json();
-        if (fbData.content) {
-          const fbTxt = fbData.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+        const fbTxt = textFromResponse(fbData);
+        if (fbTxt) {
           try {
             const fbI = parseJsonText(fbTxt);
             if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems || []), ...fbI.hidden_gems].slice(0, 6);
@@ -589,19 +664,23 @@ export default async function handler(req, res) {
         }
       }
 
-      // Write to cache
-      try {
-        const exp = new Date();
-        exp.setMonth(exp.getMonth() + 6);
-        await supabase.from("destination_intelligence").upsert({
-          cache_key: cacheKey,
-          destination: form.destinations,
-          intelligence_json: intelligence,
-          expires_at: exp.toISOString(),
-        }, { onConflict: "cache_key" });
-        console.log(`[Cache WRITE] ${cacheKey}`);
-      } catch (e) {
-        console.error("[Cache WRITE ERROR]", e.message);
+      // Write to cache only when intelligence parsed successfully
+      if (hasUsableIntelligence(intelligence)) {
+        try {
+          const exp = new Date();
+          exp.setMonth(exp.getMonth() + 6);
+          await supabase.from("destination_intelligence").upsert({
+            cache_key: cacheKey,
+            destination: form.destinations,
+            intelligence_json: intelligence,
+            expires_at: exp.toISOString(),
+          }, { onConflict: "cache_key" });
+          console.log(`[Cache WRITE] ${cacheKey}`);
+        } catch (e) {
+          console.error("[Cache WRITE ERROR]", e.message);
+        }
+      } else {
+        console.log("[Cache SKIP] intelligence too thin to cache");
       }
     }
 
@@ -609,20 +688,15 @@ export default async function handler(req, res) {
     const dayCount = getDayCount(form.dateFrom, form.dateTo);
     console.log(`[Overview] generating — ${dayCount} days`);
 
-    const ovRes = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: "claude-haiku-4-5",
-        max_tokens: 2000,
-        system: PHILOSOPHY_SYSTEM,
-        messages: [{ role: "user", content: buildOverviewPrompt(form, intelligence, dayCount) }],
-      }),
+    const ovData = await callAnthropic({
+      model: "claude-haiku-4-5",
+      max_tokens: 2000,
+      system: PHILOSOPHY_SYSTEM,
+      messages: [{ role: "user", content: buildOverviewPrompt(form, intelligence, dayCount) }],
     });
-    const ovData = await ovRes.json();
-    console.log(`[Overview] tokens: in:${ovData.usage?.input_tokens} out:${ovData.usage?.output_tokens}`);
+    console.log(`[Overview] tokens: in:${ovData.usage?.input_tokens} out:${ovData.usage?.output_tokens} stop:${ovData.stop_reason}`);
 
-    const ovTxt = (ovData.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    const ovTxt = textFromResponse(ovData);
     let overview = {};
     try {
       overview = parseJsonText(ovTxt);
@@ -633,7 +707,8 @@ export default async function handler(req, res) {
 
     // ── STAGE 2B: Day chunks ──────────────────────────────────
     const dayNumbers = Array.from({ length: dayCount }, (_, i) => i + 1);
-    const chunks = chunkArray(dayNumbers, 3);
+    const chunkSize = dayCount > 5 ? 2 : 3;
+    const chunks = chunkArray(dayNumbers, chunkSize);
     const allDays = [];
 
     for (let i = 0; i < chunks.length; i++) {
@@ -641,33 +716,33 @@ export default async function handler(req, res) {
       console.log(`[Chunk ${i + 1}] days ${chunk[0]}-${chunk[chunk.length - 1]}`);
 
       const generateChunk = async () => {
-        const chRes = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            model: "claude-haiku-4-5",
-            max_tokens: 4000,
-            system: PHILOSOPHY_SYSTEM,
-            messages: [{ role: "user", content: buildChunkPrompt(form, intelligence, overview, chunk, dayCount) }],
-          }),
+        const chData = await callAnthropic({
+          model: "claude-haiku-4-5",
+          max_tokens: 6000,
+          system: `${PHILOSOPHY_SYSTEM}\n\nOUTPUT: Return ONLY a raw JSON array of day objects. No prose, no markdown fences, no backticks.`,
+          messages: [{ role: "user", content: buildChunkPrompt(form, intelligence, overview, chunk, dayCount) }],
         });
-        const chData = await chRes.json();
-        console.log(`[Chunk ${i + 1}] tokens: in:${chData.usage?.input_tokens} out:${chData.usage?.output_tokens}`);
-        const chTxt = (chData.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
-        return parseJsonText(chTxt);
+        console.log(`[Chunk ${i + 1}] tokens: in:${chData.usage?.input_tokens} out:${chData.usage?.output_tokens} stop:${chData.stop_reason}`);
+        const chTxt = textFromResponse(chData);
+        const parsed = parseJsonText(chTxt);
+        if (!Array.isArray(parsed)) throw new Error("Chunk response is not a JSON array");
+        if (chData.stop_reason === "max_tokens") {
+          console.warn(`[Chunk ${i + 1}] hit max_tokens — output may be truncated`);
+        }
+        return parsed;
       };
 
       try {
         const days = await generateChunk();
         allDays.push(...days);
       } catch (e) {
-        console.log(`[Chunk ${i + 1}] failed — retrying`);
+        console.log(`[Chunk ${i + 1}] failed (${e.message}) — retrying`);
         await new Promise((r) => setTimeout(r, 1000));
         try {
           const days = await generateChunk();
           allDays.push(...days);
         } catch (e2) {
-          console.error(`[Chunk ${i + 1}] retry failed`);
+          console.error(`[Chunk ${i + 1}] retry failed:`, e2.message);
           return res.status(500).json({ error: `Generation failed for days ${chunk[0]}-${chunk[chunk.length - 1]}. Try again.` });
         }
       }
