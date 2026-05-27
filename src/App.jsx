@@ -42,6 +42,7 @@ const R = {
   terra: "#df815d",
   terraBg: "rgba(223,129,93,0.13)",
 };
+const C = { ink: R.bg, redDeep: R.bg, cream: R.text, gold: R.accent, amber: R.accent };
 
 const HERO_BG =
   "https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=2400&q=75";
@@ -1048,7 +1049,7 @@ function Form({ form, onChange, onSubmit, err }) {
 }
 
 // ── RESULT ─────────────────────────────────────────────────────────────────────
-function Result({ trip, setTrip, form, onReset, tripId }) {
+function Result({ trip, setTrip, form, onReset, tripId, isShared }) {
   const handleExport = () => window.print();
   return (
     <div
@@ -1142,24 +1143,26 @@ function Result({ trip, setTrip, form, onReset, tripId }) {
               >
                 Export PDF ↗
               </button>
-              <button
-                type="button"
-                onClick={onReset}
-                style={{
-                  background: R.panel2,
-                  border: `1px solid ${R.line}`,
-                  color: R.muted,
-                  fontFamily: F.mono,
-                  fontSize: "0.56rem",
-                  letterSpacing: "0.1em",
-                  padding: "10px 18px",
-                  cursor: "pointer",
-                  borderRadius: 999,
-                  fontWeight: 600,
-                }}
-              >
-                ← New trip
-              </button>
+              {!isShared && (
+                <button
+                  type="button"
+                  onClick={onReset}
+                  style={{
+                    background: R.panel2,
+                    border: `1px solid ${R.line}`,
+                    color: R.muted,
+                    fontFamily: F.mono,
+                    fontSize: "0.56rem",
+                    letterSpacing: "0.1em",
+                    padding: "10px 18px",
+                    cursor: "pointer",
+                    borderRadius: 999,
+                    fontWeight: 600,
+                  }}
+                >
+                  ← New trip
+                </button>
+              )}
             </div>
           </div>
           <TripHero trip={trip} />
@@ -1173,7 +1176,7 @@ function Result({ trip, setTrip, form, onReset, tripId }) {
           ))}
           <FoodMap foodMap={trip.foodMap} />
           <Outro budget={trip.costs} different={trip.differentiators} packing={trip.packing} />
-          <RefinePanel trip={trip} form={form} onUpdate={setTrip} />
+          {!isShared && <RefinePanel trip={trip} form={form} onUpdate={setTrip} />}
         </div>
       </div>
     </div>
@@ -1206,6 +1209,7 @@ export default function SideQuest() {
   const [phase, setPhase] = useState("form");
   const [trip, setTrip] = useState(null);
   const [tripId, setTripId] = useState(null);
+  const [sharedTripLoading, setSharedTripLoading] = useState(false);
   const [factIdx, setFactIdx] = useState(0);
   const [msgIdx, setMsgIdx] = useState(0);
   const [err, setErr] = useState("");
@@ -1216,6 +1220,29 @@ export default function SideQuest() {
     const m = setInterval(() => setMsgIdx(i=>(i+1)%RMSGS.length), 4500);
     return () => { clearInterval(f); clearInterval(m); };
   }, [phase]);
+
+  useEffect(() => {
+    const path = window.location.pathname;
+    if (path.startsWith("/trip/")) {
+      const id = path.replace("/trip/", "").trim();
+      if (!id) return;
+      setSharedTripLoading(true);
+      setPhase("loading");
+      fetch(`/api/trip/${id}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.trip_data) {
+            setTrip(data.trip_data);
+            setTripId(id);
+            setPhase("result");
+          } else {
+            setPhase("error");
+          }
+        })
+        .catch(() => setPhase("error"))
+        .finally(() => setSharedTripLoading(false));
+    }
+  }, []);
 
   const onChange = (k, v) => {
     setForm(f => {
@@ -1259,7 +1286,13 @@ export default function SideQuest() {
     }
   };
 
-  if (phase==="loading") return <Loading factIdx={factIdx} msgIdx={msgIdx}/>;
-  if (phase==="result"&&trip) return <Result trip={trip} tripId={tripId} setTrip={setTrip} form={form} onReset={()=>{ setPhase("form"); setTrip(null); setTripId(null); window.scrollTo(0,0); }}/>;
+  if (phase === "error") return (
+    <div style={{ minHeight:"100vh", background:C.ink || C.redDeep, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:16, padding:32 }}>
+      <div style={{ fontFamily:"'Cormorant Garamond',serif", fontSize:"1.5rem", color:C.cream, textAlign:"center" }}>This itinerary could not be found.</div>
+      <button onClick={() => { window.location.href = "/"; }} style={{ fontFamily:"'DM Mono',monospace", fontSize:"0.6rem", letterSpacing:"0.12em", background:"transparent", border:`1px solid ${C.gold || C.amber}`, color:C.gold || C.amber, padding:"10px 20px", borderRadius:20, cursor:"pointer" }}>← Plan a New Trip</button>
+    </div>
+  );
+  if (phase==="loading" || sharedTripLoading) return <Loading factIdx={factIdx} msgIdx={msgIdx}/>;
+  if (phase==="result"&&trip) return <Result trip={trip} tripId={tripId} isShared={phase === "result" && window.location.pathname.startsWith("/trip/")} setTrip={setTrip} form={form} onReset={()=>{ setPhase("form"); setTrip(null); setTripId(null); window.scrollTo(0,0); }}/>;
   return <Form form={form} onChange={onChange} onSubmit={generate} err={err}/>;
 }
