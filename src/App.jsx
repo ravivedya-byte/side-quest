@@ -1048,7 +1048,7 @@ function Form({ form, onChange, onSubmit, err }) {
 }
 
 // ── RESULT ─────────────────────────────────────────────────────────────────────
-function Result({ trip, setTrip, form, onReset }) {
+function Result({ trip, setTrip, form, onReset, tripId }) {
   const handleExport = () => window.print();
   return (
     <div
@@ -1097,6 +1097,33 @@ function Result({ trip, setTrip, form, onReset }) {
           <div className="np" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24, paddingBottom: 18, borderBottom: `1px solid ${R.line}`, flexWrap: "wrap", gap: 14 }}>
             <Wordmark size="small" light />
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+              {tripId && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(`${window.location.origin}/trip/${tripId}`);
+                      alert("Link copied!");
+                    } catch {
+                      alert("Could not copy link. Please copy it manually from the address bar.");
+                    }
+                  }}
+                  style={{
+                    fontFamily: F.mono,
+                    fontSize: "0.56rem",
+                    letterSpacing: "0.1em",
+                    background: "transparent",
+                    border: `1px solid ${R.accent}`,
+                    color: R.accent,
+                    padding: "10px 16px",
+                    borderRadius: 999,
+                    cursor: "pointer",
+                    fontWeight: 700,
+                  }}
+                >
+                  SHARE ↗
+                </button>
+              )}
               <button
                 type="button"
                 onClick={handleExport}
@@ -1178,6 +1205,7 @@ export default function SideQuest() {
   });
   const [phase, setPhase] = useState("form");
   const [trip, setTrip] = useState(null);
+  const [tripId, setTripId] = useState(null);
   const [factIdx, setFactIdx] = useState(0);
   const [msgIdx, setMsgIdx] = useState(0);
   const [err, setErr] = useState("");
@@ -1204,7 +1232,7 @@ export default function SideQuest() {
 
   const generate = async () => {
     if (!form.destinations||!form.departure||!form.budget||!form.preferences?.trim()) { setErr("please fill in all fields including your travel preferences — it helps us research better."); return; }
-    setErr(""); setPhase("loading"); setFactIdx(0); setMsgIdx(0);
+    setErr(""); setTripId(null); setPhase("loading"); setFactIdx(0); setMsgIdx(0);
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -1224,7 +1252,7 @@ export default function SideQuest() {
         const jsonStr = raw.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
         return JSON.parse(jsonStr);
       })();
-      setTrip(parsed); setPhase("result"); window.scrollTo(0,0);
+      setTrip(parsed); setTripId(data.tripId || null); setPhase("result"); window.scrollTo(0,0);
     } catch(e) {
       const msg = e instanceof SyntaxError ? "Itinerary response was not valid JSON after server repair. Try a shorter trip or fewer days." : "Something went wrong — "+e.message;
       setErr(msg); setPhase("form");
@@ -1232,6 +1260,6 @@ export default function SideQuest() {
   };
 
   if (phase==="loading") return <Loading factIdx={factIdx} msgIdx={msgIdx}/>;
-  if (phase==="result"&&trip) return <Result trip={trip} setTrip={setTrip} form={form} onReset={()=>{ setPhase("form"); setTrip(null); window.scrollTo(0,0); }}/>;
+  if (phase==="result"&&trip) return <Result trip={trip} tripId={tripId} setTrip={setTrip} form={form} onReset={()=>{ setPhase("form"); setTrip(null); setTripId(null); window.scrollTo(0,0); }}/>;
   return <Form form={form} onChange={onChange} onSubmit={generate} err={err}/>;
 }

@@ -1,4 +1,5 @@
 import { jsonrepair } from "jsonrepair";
+import { supabase } from "./supabase.js";
 
 // SIDE QUEST - CHUNKED DEEPSEEK PIPELINE
 // Blueprint first, then bounded day-section calls in parallel. This keeps long
@@ -124,6 +125,16 @@ function splitDestinations(destinations = "") {
     .map((part) => part.trim())
     .filter(Boolean);
   return parts.length ? parts : [destinations || "Route stop"];
+}
+
+function normaliseCacheKey(destination) {
+  return destination
+    .toLowerCase()
+    .trim()
+    .split(",")[0]
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "");
 }
 
 function parseDateOnly(value) {
@@ -413,25 +424,63 @@ export default async function handler(req, res) {
   const chunks = buildChunks(dayCount);
 
   try {
-    console.log(`[Blueprint] ${form.destinations} | days:${dayCount} | model:${DEEPSEEK_BLUEPRINT_MODEL}`);
+    const cacheKey = normaliseCacheKey(form.destinations || "");
+    let cacheHit = false;
     let blueprintResponse = { usage: {}, fallback: true };
     let blueprint;
-    try {
-      blueprintResponse = await callDeepSeekJSONWithRetry({
-        model: DEEPSEEK_BLUEPRINT_MODEL,
-        maxTokens: 3800,
-        system: BRAND_SYSTEM,
-        user: buildBlueprintPrompt(form, dayCount, chunks),
-        label: "Blueprint",
-      }, 2);
 
-      const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
-      blueprint = parsedBlueprint.json;
-      if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
-    } catch (err) {
-      if (err.name !== "EmptyModelResponseError") throw err;
-      console.warn("[Blueprint] empty after retries; using local fallback blueprint");
-      blueprint = buildLocalBlueprint(form, dayCount);
+    const { data: cacheData, error: cacheReadError } = await supabase
+      .from("destination_intelligence")
+      .select("intelligence_json, expires_at")
+      .eq("cache_key", cacheKey)
+      .gt("expires_at", new Date().toISOString())
+      .maybeSingle();
+
+    if (cacheReadError) {
+      console.warn(`[Cache Read Error] ${cacheReadError.message}`);
+    }
+
+    if (cacheData?.intelligence_json && typeof cacheData.intelligence_json === "object") {
+      cacheHit = true;
+      blueprint = cacheData.intelligence_json;
+      console.log(`[Cache Hit] ${cacheKey} (expires ${cacheData.expires_at})`);
+    } else {
+      console.log(`[Cache Miss] ${cacheKey}`);
+      console.log(`[Blueprint] ${form.destinations} | days:${dayCount} | model:${DEEPSEEK_BLUEPRINT_MODEL}`);
+      try {
+        blueprintResponse = await callDeepSeekJSONWithRetry({
+          model: DEEPSEEK_BLUEPRINT_MODEL,
+          maxTokens: 3800,
+          system: BRAND_SYSTEM,
+          user: buildBlueprintPrompt(form, dayCount, chunks),
+          label: "Blueprint",
+        }, 2);
+
+        const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
+        blueprint = parsedBlueprint.json;
+        if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
+      } catch (err) {
+        if (err.name !== "EmptyModelResponseError") throw err;
+        console.warn("[Blueprint] empty after retries; using local fallback blueprint");
+        blueprint = buildLocalBlueprint(form, dayCount);
+      }
+
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 6);
+      const { error: cacheWriteError } = await supabase
+        .from("destination_intelligence")
+        .upsert({
+          cache_key: cacheKey,
+          destination: form.destinations,
+          intelligence_json: blueprint,
+          expires_at: expiresAt.toISOString(),
+        }, { onConflict: "cache_key" });
+
+      if (cacheWriteError) {
+        console.warn(`[Cache Write Error] ${cacheWriteError.message}`);
+      } else {
+        console.log(`[Cache Write] ${cacheKey}`);
+      }
     }
 
     console.log(`[Sections] ${chunks.length} chunks via ${DEEPSEEK_SECTION_MODEL}`);
@@ -455,10 +504,29 @@ export default async function handler(req, res) {
 
     const trip = assembleTrip({ blueprint, dayChunks: sectionResponses.map((section) => section.json), dayCount });
     const cleaned = JSON.stringify(trip);
+    let tripId = null;
+
+    const { data: savedTrip, error: tripSaveError } = await supabase
+      .from("trips")
+      .insert({
+        trip_data: trip,
+        destination: form.destinations,
+      })
+      .select("id")
+      .single();
+
+    if (tripSaveError) {
+      console.warn(`[Trip Save Error] ${tripSaveError.message}`);
+    } else {
+      tripId = savedTrip?.id || null;
+      console.log(`[Trip Save] ${tripId}`);
+    }
 
     console.log(`[Done] ${form.destinations} | days:${trip.days.length} | chunks:${chunks.length}`);
     return res.status(200).json({
       trip,
+      tripId,
+      cacheHit,
       content: [{ type: "text", text: cleaned }],
       usage: {
         blueprint: blueprintResponse.usage,
