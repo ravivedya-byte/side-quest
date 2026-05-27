@@ -1,414 +1,497 @@
-import { jsonrepair } from "jsonrepair";
 import { supabase } from "./supabase.js";
 
-// SIDE QUEST - CHUNKED DEEPSEEK PIPELINE
-// Blueprint first, then bounded day-section calls in parallel. This keeps long
-// trips detailed without asking one model response to carry the entire itinerary.
-
-const DEEPSEEK_API_URL = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_BLUEPRINT_MODEL = process.env.DEEPSEEK_BLUEPRINT_MODEL || process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
-const DEEPSEEK_SECTION_MODEL = process.env.DEEPSEEK_SECTION_MODEL || process.env.DEEPSEEK_STAGE2_MODEL || "deepseek-v4-flash";
-const CALL_TIMEOUT_MS = 95000;
-const MAX_SUPPORTED_DAYS = 14;
-const CHUNK_SIZE = 3;
-
-class EmptyModelResponseError extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "EmptyModelResponseError";
-  }
-}
-
-function cleanJsonText(text = "") {
-  let cleaned = text
-    .trim()
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/\s*```$/i, "")
-    .trim();
-
-  const firstBrace = cleaned.indexOf("{");
-  const lastBrace = cleaned.lastIndexOf("}");
-  if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-    cleaned = cleaned.slice(firstBrace, lastBrace + 1).trim();
-  }
-
-  return cleaned;
-}
-
-function parseOrRepairJson(text, label) {
-  const cleaned = cleanJsonText(text);
-  try {
-    return { json: JSON.parse(cleaned), text: cleaned, repaired: false };
-  } catch (initialErr) {
-    try {
-      const repairedText = cleanJsonText(jsonrepair(cleaned));
-      return { json: JSON.parse(repairedText), text: repairedText, repaired: true };
-    } catch (repairErr) {
-      repairErr.message = `${label} parse failed: ${initialErr.message}; jsonrepair failed: ${repairErr.message}`;
-      throw repairErr;
-    }
-  }
-}
-
-function getChoiceContent(choice) {
-  const content = choice?.message?.content;
-  if (Array.isArray(content)) {
-    return content.map((part) => {
-      if (typeof part === "string") return part;
-      return part?.text || part?.content || "";
-    }).join("");
-  }
-  return typeof content === "string" ? content : "";
-}
-
-async function callDeepSeekJSON({ model, system, user, maxTokens, label }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), CALL_TIMEOUT_MS);
-
-  const response = await fetch(DEEPSEEK_API_URL, {
-    method: "POST",
-    signal: controller.signal,
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-      response_format: { type: "json_object" },
-      max_tokens: maxTokens,
-      stream: false,
-    }),
-  }).finally(() => clearTimeout(timeout));
-
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data.error?.message || `DeepSeek API error (${response.status})`);
-  }
-
-  const choice = data.choices?.[0] || {};
-  const content = getChoiceContent(choice);
-  if (!content.trim()) {
-    const finishReason = choice.finish_reason || "unknown";
-    console.warn(`[DeepSeek Empty] ${label || "request"} | model:${model} | finish:${finishReason} | usage:${JSON.stringify(data.usage || {})}`);
-    throw new EmptyModelResponseError(`${label || "DeepSeek"} returned an empty response`);
-  }
-
-  return {
-    text: cleanJsonText(content),
-    usage: data.usage || {},
-  };
-}
-
-async function callDeepSeekJSONWithRetry(options, retries = 1) {
-  let lastError;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    try {
-      return await callDeepSeekJSON(options);
-    } catch (err) {
-      lastError = err;
-      const retryable = err.name === "EmptyModelResponseError" || err.name === "AbortError";
-      if (!retryable || attempt === retries) break;
-      console.warn(`[DeepSeek Retry] ${options.label || "request"} attempt ${attempt + 2}/${retries + 1} after ${err.message}`);
-    }
-  }
-  throw lastError;
-}
-
-function splitDestinations(destinations = "") {
-  const parts = destinations
-    .split(/\s*(?:,|;|\||\+|->| to )\s*/i)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  return parts.length ? parts : [destinations || "Route stop"];
-}
+const headers = {
+  "Content-Type": "application/json",
+  "x-api-key": process.env.ANTHROPIC_API_KEY,
+  "anthropic-version": "2023-06-01",
+};
 
 function normaliseCacheKey(destination) {
-  return destination
-    .toLowerCase()
-    .trim()
-    .split(",")[0]
-    .trim()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_|_$/g, "");
+  return destination.toLowerCase().trim().split(",")[0].trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
 
-function parseDateOnly(value) {
-  if (!value) return null;
-  const date = new Date(`${value}T00:00:00Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
+function getDayCount(dateFrom, dateTo) {
+  if (!dateFrom || !dateTo) return 3;
+  const diff = Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24));
+  return Math.max(1, Math.min(diff + 1, 14));
 }
 
-function getTripDayCount(form) {
-  const from = parseDateOnly(form.dateFrom);
-  const to = parseDateOnly(form.dateTo);
-  if (from && to && to >= from) {
-    const diff = Math.round((to.getTime() - from.getTime()) / 86400000) + 1;
-    return Math.min(Math.max(diff, 1), MAX_SUPPORTED_DAYS);
-  }
-
-  const text = `${form.destinations || ""} ${form.preferences || ""}`;
-  const match = text.match(/\b(\d{1,2})\s*(day|days|night|nights)\b/i);
-  if (match) {
-    const days = Number(match[1]) + (match[2].toLowerCase().startsWith("night") ? 1 : 0);
-    return Math.min(Math.max(days, 1), MAX_SUPPORTED_DAYS);
-  }
-
-  return 5;
-}
-
-function buildChunks(dayCount) {
+function chunkArray(arr, size) {
   const chunks = [];
-  for (let start = 1; start <= dayCount; start += CHUNK_SIZE) {
-    const end = Math.min(start + CHUNK_SIZE - 1, dayCount);
-    chunks.push({
-      start,
-      end,
-      days: Array.from({ length: end - start + 1 }, (_, i) => start + i),
-    });
-  }
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
   return chunks;
 }
 
-function compactBlueprintForPrompt(blueprint) {
-  return {
-    tripTitle: blueprint.tripTitle,
-    overview: blueprint.overview,
-    routePlan: blueprint.routePlan,
-    foodMap: blueprint.foodMap,
-    generationNotes: blueprint.generationNotes,
+// ── CONFIDENCE SCORING ──────────────────────────────────────────────────────
+function scoreIntelligence(intel) {
+  if (!intel || typeof intel !== "object" || Object.keys(intel).length < 3) {
+    return { score: 0, maxScore: 15, confidence: 0, grade: "low", weakAreas: ["empty_response"], log: "Stage 1 empty" };
+  }
+  let score = 0;
+  const weakAreas = [];
+  const log = [];
+
+  const gems = Array.isArray(intel.hidden_gems) ? intel.hidden_gems : [];
+  const specificGems = gems.filter(g => typeof g === "string" && (g.includes("—") || g.includes(" - ") || g.length > 35));
+  score += Math.min(specificGems.length, 3);
+  if (specificGems.length < 2) { weakAreas.push("hidden_gems"); log.push(`gems:${specificGems.length}`); } else log.push(`gems:${specificGems.length}✓`);
+
+  const hacks = Array.isArray(intel.crowd_hacks) ? intel.crowd_hacks : [];
+  const timedHacks = hacks.filter(h => typeof h === "string" && /\b\d{1,2}(:\d{2})?\s*(am|pm|AM|PM)|before \d|after \d|\d:\d{2}/i.test(h));
+  score += Math.min(timedHacks.length * 1.5, 3);
+  if (timedHacks.length === 0) { weakAreas.push("crowd_hacks"); log.push("hacks:no_timings"); } else log.push(`hacks:${timedHacks.length}✓`);
+
+  const stays = Array.isArray(intel.best_stay_areas) ? intel.best_stay_areas : [];
+  const richStays = stays.filter(s => s && typeof s.why === "string" && s.why.length > 15 && s.name);
+  score += Math.min(richStays.length, 2);
+  if (richStays.length < 1) { weakAreas.push("stay_areas"); log.push("stays:weak"); } else log.push(`stays:${richStays.length}✓`);
+
+  const food = Array.isArray(intel.food_spots) ? intel.food_spots : [];
+  const namedFood = food.filter(f => typeof f === "string" && f.length > 20 && (f.includes("—") || f.includes("-") || /[A-Z]/.test(f.slice(1))));
+  score += Math.min(namedFood.length, 2);
+  if (namedFood.length < 1) { weakAreas.push("food_spots"); log.push("food:generic"); } else log.push(`food:${namedFood.length}✓`);
+
+  const traps = Array.isArray(intel.tourist_traps) ? intel.tourist_traps : [];
+  score += traps.filter(t => typeof t === "string" && t.length > 15).length > 0 ? 1 : 0;
+  if (traps.length === 0) { weakAreas.push("tourist_traps"); log.push("traps:none"); } else log.push("traps✓");
+
+  const seasonNotes = intel.season_notes || "";
+  score += seasonNotes.length > 30 && !/weather can be|unpredictable|varies by/i.test(seasonNotes) ? 1 : 0;
+  if (seasonNotes.length < 30) { weakAreas.push("seasonality"); log.push("season:shallow"); } else log.push("season✓");
+
+  const timing = intel.local_timing || "";
+  score += timing.length > 25 ? 1 : 0;
+  if (timing.length < 25) { weakAreas.push("local_timing"); log.push("timing:thin"); } else log.push("timing✓");
+
+  const transport = intel.transport_notes || "";
+  score += transport.length > 20 && !/use public transport|take a taxi|rent a car/i.test(transport) ? 1 : 0;
+
+  const warnings = Array.isArray(intel.seasonal_warnings) ? intel.seasonal_warnings : [];
+  score += warnings.filter(w => typeof w === "string" && w.length > 15).length > 0 ? 1 : 0;
+
+  const allText = JSON.stringify(intel).toLowerCase();
+  const genericPhrases = ["local cuisine", "popular spots", "beautiful scenery", "worth visiting", "must see", "check it out", "great place", "good food", "amazing views", "nice area", "worth a visit", "don't miss"];
+  const penalty = genericPhrases.filter(p => allText.includes(p)).length * 0.4;
+  score -= penalty;
+  if (penalty > 0.8) { weakAreas.push("generic_language"); log.push(`generic:-${penalty.toFixed(1)}`); }
+
+  const properBonus = Math.min(((allText.match(/\b[A-Z][a-z]{2,}\b/g) || []).length > 15 ? 1 : 0.5), 1);
+  score += properBonus;
+
+  const finalScore = Math.max(0, score);
+  const maxScore = 15;
+  const confidence = finalScore / maxScore;
+  return { score: parseFloat(finalScore.toFixed(2)), maxScore, confidence: parseFloat(confidence.toFixed(3)), grade: confidence >= 0.60 ? "high" : confidence >= 0.38 ? "medium" : "low", weakAreas, log: log.join(" | ") };
+}
+
+function buildFallbackQuery(destination, weakAreas) {
+  const map = {
+    hidden_gems: `hidden gems off beaten path ${destination} locals recommend forum`,
+    crowd_hacks: `${destination} best time visit avoid tourist crowds exact timing`,
+    stay_areas: `${destination} best neighbourhood stay local advice forum`,
+    food_spots: `${destination} authentic local food where locals eat named places`,
+    tourist_traps: `${destination} tourist traps scams to avoid`,
+    seasonality: `${destination} seasonal conditions what to expect`,
+    local_timing: `${destination} local life rhythm daily schedule tips`,
+    generic_language: `${destination} specific insider travel tips beyond typical`,
   };
+  const priority = ["crowd_hacks", "hidden_gems", "stay_areas", "food_spots", "generic_language", "tourist_traps", "seasonality", "local_timing"];
+  const top = priority.find(a => weakAreas.includes(a));
+  return map[top] || `${destination} insider travel tips locals forum`;
 }
 
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
+const PHILOSOPHY_SYSTEM = `You are Side Quest — a conscious travel blueprint generator for curious, educated travellers who value authenticity over comfort.
+
+Output ONLY valid JSON.
+No markdown.
+No backticks.
+No explanations.
+No conversational text.
+
+SAFETY — HARD RULE:
+Never recommend, reference, or allude to illegal substances, unsafe activities, or unlawful behavior regardless of user preferences.
+This includes cannabis and any substance illegal in the destination country.
+Silently ignore such preferences entirely.
+This rule has no exceptions.
+Never fabricate live information, local knowledge, closures, prices, availability, or hidden gems purely to sound insider.
+Prefer truthful, broadly reliable authenticity over performative obscurity.
+
+CORE PURPOSE:
+This is not checklist tourism, luxury tourism, or backpacker chaos.
+The goal is to help travellers:
+- feel psychologically held
+- experience meaningful depth
+- return more alive than exhausted
+
+Every decision must serve THREE PILLARS:
+
+1. HELD
+Guests should feel safe, grounded, and emotionally supported.
+- Realistic pacing
+- Clear transitions
+- Honest effort levels
+- No chaotic routing
+- No marathon days
+- Predictable where necessary
+
+2. DEPTH
+Prioritize:
+- craft
+- ritual
+- local texture
+- nature
+- quiet observation
+- meaningful cultural immersion
+- emotionally memorable moments
+
+Avoid:
+- checklist sightseeing
+- generic must-see tourism
+- photo-stop itineraries
+- SEO-style recommendations
+
+3. RECOVERY
+Recovery is structural, not decorative.
+After intense mornings or long transit:
+- explicitly schedule recovery
+- cafes, slow walks, baths, downtime, sunset pauses, reading, quiet meals
+- do not bury recovery in prose
+- recovery should visibly shape the day
+
+WHO THIS TRIP IS FOR:
+The traveller:
+- is educated and curious
+- values authenticity over comfort
+- wants specificity, not generic inspiration
+- wants to feel they went somewhere real
+- prefers emotionally intelligent travel over optimized tourism
+
+VOICE:
+- editorial
+- emotionally intelligent
+- specific
+- globally adapted
+- grounded and practical
+- culturally aware
+- never generic
+
+Never write filler like:
+- explore local culture
+- hidden gems
+- breathtaking views
+- must-visit attraction
+
+Always use:
+- named places
+- named dishes
+- specific timings
+- sensory detail
+- concrete recommendations
+
+GLOBAL ADAPTATION:
+Mirror the destination culture in pacing, tone, food, rhythm, and recommendation style.
+A Japan itinerary should feel fundamentally different from Rajasthan, Patagonia, Istanbul, or Vietnam.
+Never apply one-country travel assumptions globally.
+
+TRIP ARC:
+The entire trip must read like a narrative in three movements:
+
+1. Arrival and decompression
+Early segment should slow the traveller down and help them settle psychologically.
+
+2. Immersion and depth
+Middle segment should contain the emotional and cultural core of the trip.
+
+3. Integration and quiet return
+Final segment should reduce intensity and create emotional space before departure.
+
+The philosophy text, tagline, core memories, pacing, and final days must reflect this arc.
+
+PACING RULES:
+- Maximum 3 major activities per day
+- Food stops do not count toward this limit
+- Recovery blocks do not count toward this limit
+- Transit rows do not count toward this limit
+- Avoid excessive early starts on consecutive days
+- Avoid unnecessary hotel switching
+- Avoid geographic zigzagging
+- Build days as coherent physical movement arcs
+
+DAY DESIGN:
+Each day should feel intentional and geographically coherent.
+
+GEOGRAPHIC FLOW — MANDATORY ANCHORS:
+Every day has exactly two anchors scheduled before anything else.
+
+ANCHOR 1 — SUNSET:
+Identify the single best sunset spot for that day's location.
+Position the group there 25-30 minutes before actual sunset.
+The entire afternoon must flow geographically toward this point.
+Nothing moves away from the sunset direction after 3 PM.
+Prefer quieter less obvious viewpoints over the crowded default.
+Briefly state why this spot over the obvious one.
+
+ANCHOR 2 — TOP TIME-SENSITIVE ACTIVITY:
+The one activity that has the most to gain from a specific time window.
+Temple before 8:30 AM. Waterfall at dawn. Market at sunrise.
+Lock it at its optimal window first, then build around it.
+
+All other activities form a continuous geographic arc connecting these two anchors.
+Route curves — never zigzags.
+Morning near the day's starting point.
+Afternoon drifting toward the sunset location.
+
+After 3 PM movement should naturally drift toward the sunset anchor.
+Avoid crossing the destination repeatedly.
+Prefer quieter scenic sunset alternatives.
+Local rhythms and emotionally resonant endings.
+Avoid crowded viewpoint cliches unless genuinely exceptional.
+
+MUST-DO DISTRIBUTION:
+Across each destination stay include:
+- one early or pre-crowd experience
+- one meaningful cultural immersion
+- one quiet reflective moment
+- one offbeat or local perspective
+
+Spread these naturally across days.
+Do not cluster all highlights into one day.
+
+FOOD PHILOSOPHY:
+Food is central to depth, not an afterthought.
+
+Prioritize:
+- family-run restaurants
+- homestay kitchens
+- market stalls
+- local cafes
+- regional specialties
+- neighborhood institutions
+- places locals genuinely use
+
+Avoid:
+- tourist-facing generic restaurants
+- internationalized menus unless contextually relevant
+
+Always include:
+- named establishments
+- specific dishes
+- what makes the place special
+- timing context when relevant
+
+Every day must have 2-3 named food spots with specific dishes.
+Never write try local cuisine or similar generic advice.
+
+STAY PHILOSOPHY:
+Recommend neighborhoods, not just cities.
+
+Explain:
+- why this area works
+- what atmosphere it offers
+- what it enables geographically and emotionally
+- what tourist-heavy area is intentionally avoided and why
+
+Prefer:
+- homestays
+- guesthouses
+- small independents
+- locally run stays
+
+Use major hotels only when genuinely justified.
+
+TRANSPORT PHILOSOPHY:
+When transport mode is flexible choose the most practical and emotionally coherent option considering:
+- time
+- cost
+- stress
+- scenery
+- sleep quality
+- recovery impact
+
+Prefer:
+- direct routes
+- overnight trains when they genuinely improve pacing
+- night buses only when comfortable and logical
+- walkable neighborhoods
+- public transport where culturally and practically appropriate
+
+Do not optimize purely for speed.
+
+ROUTING INTELLIGENCE:
+Always recommend the shortest practical route between stops.
+Do not route through major city hubs unless genuinely on the most direct path.
+Minimise total travel time.
+Make a clear judgment call — do not default to the most recognisable city names along the way.
+
+EN ROUTE DISCOVERIES:
+For road and motorcycle travel days, surface 1-2 specific named stops that fall within 30 minutes off the main route.
+Name the place exactly.
+State where on the route the turnoff is.
+Give one line on why it is worth stopping.
+How long the traveller spends there is entirely their choice — do not suggest a time limit.
+These unplanned moments are often what people remember most about a road trip.
+
+TIMELINE QUALITY:
+Each timeline entry should feel useful and real.
+
+Good entries include:
+- exact place names
+- emotional framing
+- timing logic
+- practical realism
+- sensory specificity
+
+Bad entries:
+- vague inspiration
+- generic tourism copy
+- repetitive adjectives
+- overstuffed scheduling
+
+PHILOSOPHY TEXT:
+- maximum 45 words
+- specific to this traveller and destination
+- emotionally sharp
+- not a generic brand statement
+
+TAGLINE:
+- maximum 18 words
+- editorial and specific
+- not a tourism slogan
+
+CORE MEMORIES:
+- concrete future moments
+- sensory and emotionally specific
+- maximum 18 words each
+- should feel like scenes the traveller will genuinely remember years later
+
+DIFFERENTIATORS:
+- opinionated and specific
+- explain why this itinerary differs from standard travel plans
+- maximum 20 words each
+
+PACKING:
+- highly specific to terrain, weather, pacing, and trip style
+- maximum 12 words each
+- avoid generic packing advice
+
+COSTS:
+Provide realistic per-person estimates in the user's currency.
+Include transport, accommodation, food, activities, misc, total.
+Style: mid-market authenticity, neither backpacker-cheap nor luxury, honest and realistic.
+
+OUTPUT COMPRESSION — HARD LIMITS:
+- philosophy: max 45 words
+- tagline: max 18 words
+- memories: max 18 words each
+- moodTags: max 5 tags
+- timeline descriptions: max 28 words
+- tips: max 20 words each
+- hacks: max 16 words each and must include exact timing
+- warnings: max 15 words each
+- food items: max 20 words each
+- stay.why: max 30 words
+- stay.notWhere: max 24 words
+- differentiators: max 20 words each
+- packing: max 12 words each
+
+WOMEN'S SAFETY:
+If relevant prefer well-reviewed psychologically comfortable areas.
+Avoid unsafe arrival timings.
+Provide concise respectful practical warnings.
+Never fearmonger. Never patronize.
+
+RESEARCH STYLE:
+Think like thoughtful Reddit travel communities, long-form travel writers, experienced locals, culturally literate independent travellers.
+Not SEO blogs, listicles, or generic influencer itineraries.
+
+FINAL STANDARD:
+The itinerary should feel emotionally intentional, geographically intelligent, culturally grounded, physically humane, deeply specific, quietly memorable.
+The traveller should feel: I experienced this place properly. Not: I completed a schedule.`;
+
+function buildStage1Prompt(form) {
+  const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
+  return `Extract travel intelligence for: ${form.destinations} from ${form.departure}
+Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
+Preferences: ${form.preferences}
+
+Run maximum 3 searches: (1) best time and crowd levels for ${month} (2) best neighbourhoods and local advice (3) crowd hacks with exact timings and hidden gems
+
+Return ONLY this JSON — no prose, no markdown, no backticks:
+{"season_notes":"specific to ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order — price if known"],"transport_notes":"specific advice","seasonal_warnings":["specific warning"],"local_timing":"daily rhythms specific to destination"}`;
 }
 
-function normaliseDay(day, fallbackNumber) {
-  return {
-    dayNumber: Number(day?.dayNumber) || fallbackNumber,
-    place: day?.place || "Route stop",
-    title: day?.title || "A grounded day",
-    subtitle: day?.subtitle || "A steady rhythm of movement, depth, and recovery.",
-    timeline: asArray(day?.timeline).map((item) => ({
-      time: item?.time || "",
-      title: item?.title || "Planned moment",
-      desc: item?.desc || "",
-      type: item?.type || "highlight",
-      mustDo: Boolean(item?.mustDo),
-    })),
-    food: asArray(day?.food),
-    stay: day?.stay || { locality: "", why: "", notWhere: "" },
-    tips: asArray(day?.tips),
-    hacks: asArray(day?.hacks),
-    warnings: asArray(day?.warnings),
-    budget: day?.budget || "",
-  };
-}
+function buildOverviewPrompt(form, intelligence, dayCount) {
+  const isTransportSuggested = form.travelMode === "Suggested";
+  const transportNote = isTransportSuggested
+    ? `Evaluate the best transport from ${form.departure} to ${form.destinations}. Consider night buses, overnight trains, direct flights. Recommend ONE specific option with departure time, arrival time, and estimated cost. Build Day 1 timeline around actual arrival time.`
+    : `Transport mode: ${form.travelMode}`;
+  return `RESEARCH INTELLIGENCE:
+${JSON.stringify(intelligence)}
 
-function ensureFoodMap(blueprint, days) {
-  const existing = asArray(blueprint.foodMap).filter((group) => group?.place && asArray(group.spots).length);
-  if (existing.length) return existing;
+TRIP: ${form.destinations} from ${form.departure}
+Dates: ${form.dateFrom || "flexible"} to ${form.dateTo || "flexible"} | ${dayCount} days | ${form.people} people
+Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
+Preferences: ${form.preferences}
+${transportNote}
 
-  const places = [...new Set(days.map((day) => day.place).filter(Boolean))];
-  return places.map((place) => ({
-    place,
-    spots: days
-      .filter((day) => day.place === place)
-      .flatMap((day) => asArray(day.food))
-      .slice(0, 3)
-      .map((food) => {
-        const parts = String(food).split(/\s+(?:-|\u2014)\s+/).map((part) => part.trim()).filter(Boolean);
-        return {
-          name: parts[0] || String(food),
-          order: parts[1] || "local order",
-          bestFor: "local meal",
-          why: parts[2] || "Fits the route rhythm",
-        };
-      }),
-  }));
-}
-
-function assembleTrip({ blueprint, dayChunks, dayCount }) {
-  const generatedDays = dayChunks
-    .flatMap((chunk) => asArray(chunk.days))
-    .sort((a, b) => (Number(a.dayNumber) || 0) - (Number(b.dayNumber) || 0))
-    .slice(0, dayCount);
-  const days = Array.from({ length: dayCount }, (_, index) => {
-    const dayNumber = index + 1;
-    const matchingDay = generatedDays.find((day) => Number(day?.dayNumber) === dayNumber);
-    return normaliseDay(matchingDay, dayNumber);
-  });
-
-  return {
-    tripTitle: blueprint.tripTitle || "Side Quest Itinerary",
-    tagline: blueprint.tagline || "A slower, deeper route built around presence.",
-    travelStyle: blueprint.travelStyle || "Conscious travel",
-    moodTags: asArray(blueprint.moodTags).slice(0, 5),
-    philosophy: blueprint.philosophy || "",
-    memories: asArray(blueprint.memories).slice(0, 5),
-    overview: blueprint.overview || {
-      routeStops: [...new Set(days.map((day) => day.place).filter(Boolean))],
-      duration: `${dayCount} days`,
-      transport: "",
-      totalBudget: "",
-      season: "",
-    },
-    days,
-    foodMap: ensureFoodMap(blueprint, days),
-    costs: blueprint.costs || {},
-    differentiators: asArray(blueprint.differentiators),
-    packing: asArray(blueprint.packing),
-  };
-}
-
-const BRAND_SYSTEM = `You are Side Quest, a conscious travel blueprint creator for a real operator.
-
-BRAND:
-(1) Held and low-stress: clear transitions, realistic timing, psychologically safe pacing.
-(2) Depth: craft, ritual, nature, quiet observation, meaningful local encounter; not checklist sightseeing.
-(3) Recovery: after intense mornings, include real recovery time.
-
-STYLE: editorial, specific, practical, globally adapted. Use best-known travel knowledge and forum-style judgement, but do not pretend to have live web search or current certainty about closures/prices.
-
-RULES:
-- Prefer quieter, authentic, locally grounded experiences over generic tourist hits.
-- Prefer homestays, family-run guesthouses, small independents, public/shared/local transport where sensible.
-- Infer currency from budget text and use it consistently.
-- If women's safety is prioritized, bias toward reputable areas, sensible arrival times, and practical non-alarmist warnings.
-- Return ONLY valid JSON. No markdown, no backticks, no prose outside JSON.`;
-
-function buildTripContext(form, dayCount) {
-  const dateStr = form.dateFrom && form.dateTo ? `${form.dateFrom} to ${form.dateTo}` : form.dateFrom || "flexible";
-  const transport = form.travelMode === "Suggested"
-    ? `Suggest the best transport from ${form.departure}, including rough timing and cost.`
-    : form.travelMode;
-  return `Trip: ${dayCount} days in ${form.destinations} from ${form.departure}
-Dates: ${dateStr}
-People: ${form.people}
-Budget: ${form.budget} per person
-Transport: ${transport}
-Preferences: ${form.preferences || ""}
-Women's safety prioritized: ${form.prioritizeWomensSafety ? "yes" : "no"}`;
-}
-
-function buildLocalBlueprint(form, dayCount) {
-  const stops = splitDestinations(form.destinations);
-  return {
-    tripTitle: `${form.destinations} Side Quest`,
-    tagline: "A slower route shaped around depth, recovery, and local texture.",
-    travelStyle: "Conscious travel",
-    moodTags: ["slow", "local", "restorative", "offbeat"],
-    philosophy: "This route balances meaningful local encounters with realistic pacing, recovery windows, and quieter alternatives to the obvious tourist circuit.",
-    memories: ["A quiet sunset away from the crowd", "A local meal that anchors the day", "A slower morning with room to breathe"],
-    overview: {
-      routeStops: stops,
-      duration: `${dayCount} days`,
-      transport: form.travelMode === "Suggested" ? "Best route to be recommended inside the day plan" : form.travelMode,
-      transportNote: form.travelMode === "Suggested" ? `Start from ${form.departure}; choose the most sensible route for budget and arrival time.` : "Use the selected travel mode.",
-      originalTransport: form.travelMode,
-      totalBudget: `${form.budget}/person`,
-      season: form.dateFrom || form.dateTo ? `Planned for ${form.dateFrom || "flexible"} to ${form.dateTo || "flexible"}.` : "Season flexible; verify live weather and closures before booking.",
-    },
-    routePlan: stops.map((place, index) => ({
-      place,
-      days: Array.from({ length: dayCount }, (_, i) => i + 1).filter((day) => (day - 1) % stops.length === index),
-      stay: { locality: "central but quiet local neighbourhood", why: "Keeps transfers simple while avoiding the busiest tourist strip.", notWhere: "Avoid the loudest nightlife or package-tour cluster." },
-      arc: "Use this stop for a grounded mix of local food, depth, and recovery.",
-    })),
-    foodMap: [],
-    costs: {
-      transport: { amount: "TBD", note: "Estimate inside route details" },
-      accommodation: { amount: "TBD", note: "Small stays or homestays preferred" },
-      food: { amount: "TBD", note: "Local meals and cafes" },
-      activities: { amount: "TBD", note: "Depth-first experiences" },
-      misc: { amount: "TBD", note: "Buffer for transfers and tips" },
-      total: `${form.budget}/person`,
-    },
-    differentiators: [
-      "The route prioritizes recovery instead of packing every hour.",
-      "Sunsets and time-sensitive moments anchor the geography of each day.",
-      "Food choices are treated as part of the experience, not filler.",
-      "Stay areas bias toward calmer, locally grounded neighbourhoods.",
-    ],
-    packing: ["Comfortable walking shoes", "Light day bag", "Reusable bottle", "Layer for evenings", "Offline maps"],
-    generationNotes: ["Blueprint fallback used after empty model response; day chunks should infer specifics."],
-  };
-}
-
-function buildBlueprintPrompt(form, dayCount, chunks) {
-  return `${buildTripContext(form, dayCount)}
-
-Create the route-level blueprint only. Do NOT generate day timelines.
-
-Day chunks that will be generated next: ${chunks.map((c) => `days ${c.start}-${c.end}`).join(", ")}.
-
-Return ONLY this JSON:
+Generate the trip OVERVIEW only — no days array. Return ONLY this JSON:
 {
-  "tripTitle":"specific title",
-  "tagline":"max 18 words",
-  "travelStyle":"short style label",
-  "moodTags":["max 5 short tags"],
-  "philosophy":"max 55 words",
-  "memories":["3-5 concrete sensory memories, max 16 words each"],
-  "overview":{
-    "routeStops":["ordered stop names"],
-    "duration":"${dayCount} days",
-    "transport":"specific recommendation or selected mode",
-    "transportNote":"departure/arrival/cost if transport is suggested, otherwise brief note",
-    "originalTransport":"${form.travelMode}",
-    "totalBudget":"budget/person",
-    "season":"one specific line"
+  "tripTitle": "",
+  "tagline": "max 18 words",
+  "travelStyle": "",
+  "moodTags": ["max 5 tags"],
+  "philosophy": "max 45 words — specific to this trip and traveller",
+  "memories": ["max 18 words each — concrete sensory future moment"],
+  "overview": {
+    "routeStops": [],
+    "duration": "${dayCount} days",
+    "transport": "",
+    "transportNote": "",
+    "totalBudget": "",
+    "season": ""
   },
-  "routePlan":[{"place":"actual stop","days":[1,2],"stay":{"locality":"name","why":"max 30 words","notWhere":"direct comparison max 24 words"},"arc":"what this stop contributes"}],
-  "foodMap":[{"place":"actual stop","spots":[{"name":"Named place","order":"specific dish/order","bestFor":"breakfast|lunch|dinner|coffee|snack|local meal","why":"max 14 words"}]}],
-  "costs":{"transport":{"amount":"X","note":"brief"},"accommodation":{"amount":"X","note":"brief"},"food":{"amount":"X","note":"brief"},"activities":{"amount":"X","note":"brief"},"misc":{"amount":"X","note":"brief"},"total":"X/person"},
-  "differentiators":["4-6 specific points, max 26 words each"],
-  "packing":["5-8 specific items, max 12 words each"],
-  "generationNotes":["named hidden gems, crowd hacks, tourist traps, local rhythms to respect"]
+  "costs": {
+    "transport": {"amount":"","note":""},
+    "accommodation": {"amount":"","note":""},
+    "food": {"amount":"","note":""},
+    "activities": {"amount":"","note":""},
+    "misc": {"amount":"","note":""},
+    "total": ""
+  },
+  "differentiators": ["max 20 words each — specific and opinionated"],
+  "packing": ["max 12 words each — specific to this trip"]
 }`;
 }
 
-function buildSectionPrompt({ form, dayCount, chunk, blueprint }) {
-  return `${buildTripContext(form, dayCount)}
+function buildChunkPrompt(form, intelligence, overview, chunkDays, totalDays) {
+  return `RESEARCH INTELLIGENCE:
+${JSON.stringify(intelligence)}
 
-ROUTE BLUEPRINT:
-${JSON.stringify(compactBlueprintForPrompt(blueprint))}
+TRIP OVERVIEW CONTEXT:
+${JSON.stringify(overview)}
 
-Generate ONLY days ${chunk.start}-${chunk.end}. Do not include days outside this range.
-Return exactly one day object for each of these day numbers: ${chunk.days.join(", ")}.
+TRIP: ${form.destinations} | ${totalDays} days total | Budget: ${form.currencySymbol || "₹"}${form.budget}/person
+Preferences: ${form.preferences}
 
-DAY RULES:
-- 6-8 timeline rows per day.
-- Max 3 major activities per day; food-only, short transit, and recovery do not count.
-- Exactly one sunset row per day, scheduled 25-30 minutes before sunset, with a short reason why that spot over the obvious viewpoint.
-- Include one top time-sensitive activity at its best time.
-- Add recovery after intense mornings.
-- Across each place, include mustDo:true entries for early/pre-crowd, cultural/local, quiet/recovery, and offbeat angles where possible.
-- Each day has 2-3 named food spots with specific dishes.
-- tips/hacks/warnings should be concise and practical; hacks must include exact timing.
-- Keep geographic flow smooth. No zigzag day plans.
+Generate ONLY days ${chunkDays[0]} to ${chunkDays[chunkDays.length - 1]} of this ${totalDays}-day trip.
+Return ONLY a JSON array of day objects — no markdown, no backticks, no explanation:
+[{
+  "dayNumber": 1,
+  "place": "actual city or town or village name for this day",
+  "title": "evocative character title for this day",
+  "subtitle": "narrative arc — morning action, afternoon shift, evening landing",
+  "timeline": [{"time":"6:00 AM","title":"activity title","desc":"max 28 words","type":"highlight|travel|food|sunset|stay|tip|recovery","mustDo":false}],
+  "food": ["Named Place — specific dish — one line context max 20 words"],
+  "stay": {"locality":"neighbourhood name","why":"max 30 words","notWhere":"max 24 words direct comparison"},
+  "tips": ["max 20 words each"],
+  "hacks": ["max 16 words each — must include exact timing"],
+  "warnings": ["max 15 words each"],
+  "budget": "X/person in user currency"
+}]`;
+}
 
-Return ONLY this JSON:
-{
-  "days":[{
-    "dayNumber":${chunk.start},
-    "place":"actual city/town/village",
-    "title":"evocative but specific",
-    "subtitle":"morning, afternoon, evening arc",
-    "timeline":[{"time":"5:30 AM","title":"activity","desc":"max 30 words","type":"highlight|travel|food|sunset|stay|tip|recovery","mustDo":false}],
-    "food":["Named Place - specific dish - why"],
-    "stay":{"locality":"name","why":"max 30 words","notWhere":"max 24 words"},
-    "tips":["max 2, max 20 words each"],
-    "hacks":["max 2, exact timing"],
-    "warnings":["max 2, max 16 words each"],
-    "budget":"X/person"
-  }]
-}`;
+function parseJsonText(txt) {
+  return JSON.parse(txt.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim());
 }
 
 export default async function handler(req, res) {
@@ -418,127 +501,208 @@ export default async function handler(req, res) {
 
   const { form } = req.body;
   if (!form || !form.destinations) return res.status(400).json({ error: "Missing form data" });
-  if (!process.env.DEEPSEEK_API_KEY) return res.status(500).json({ error: "Missing DEEPSEEK_API_KEY" });
-
-  const dayCount = getTripDayCount(form);
-  const chunks = buildChunks(dayCount);
 
   try {
-    const cacheKey = normaliseCacheKey(form.destinations || "");
+    // ── CACHE LOOKUP ──────────────────────────────────────────
+    const cacheKey = normaliseCacheKey(form.destinations);
+    let intelligence = {};
     let cacheHit = false;
-    let blueprintResponse = { usage: {}, fallback: true };
-    let blueprint;
 
-    const { data: cacheData, error: cacheReadError } = await supabase
-      .from("destination_intelligence")
-      .select("intelligence_json, expires_at")
-      .eq("cache_key", cacheKey)
-      .gt("expires_at", new Date().toISOString())
-      .maybeSingle();
-
-    if (cacheReadError) {
-      console.warn(`[Cache Read Error] ${cacheReadError.message}`);
+    try {
+      const { data: cached } = await supabase
+        .from("destination_intelligence")
+        .select("intelligence_json")
+        .eq("cache_key", cacheKey)
+        .gt("expires_at", new Date().toISOString())
+        .single();
+      if (cached?.intelligence_json) {
+        intelligence = cached.intelligence_json;
+        cacheHit = true;
+        console.log(`[Cache HIT] ${cacheKey}`);
+      }
+    } catch (e) {
+      console.log(`[Cache MISS] ${cacheKey}`);
     }
 
-    if (cacheData?.intelligence_json && typeof cacheData.intelligence_json === "object") {
-      cacheHit = true;
-      blueprint = cacheData.intelligence_json;
-      console.log(`[Cache Hit] ${cacheKey} (expires ${cacheData.expires_at})`);
-    } else {
-      console.log(`[Cache Miss] ${cacheKey}`);
-      console.log(`[Blueprint] ${form.destinations} | days:${dayCount} | model:${DEEPSEEK_BLUEPRINT_MODEL}`);
-      try {
-        blueprintResponse = await callDeepSeekJSONWithRetry({
-          model: DEEPSEEK_BLUEPRINT_MODEL,
-          maxTokens: 3800,
-          system: BRAND_SYSTEM,
-          user: buildBlueprintPrompt(form, dayCount, chunks),
-          label: "Blueprint",
-        }, 2);
+    // ── STAGE 1: Research ─────────────────────────────────────
+    if (!cacheHit) {
+      console.log(`[S1] Researching: ${form.destinations}`);
+      const s1Res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          model: "claude-haiku-4-5",
+          max_tokens: 1200,
+          tools: [{ type: "web_search_20250305", name: "web_search" }],
+          system: "You are a compact travel intelligence extractor. Run maximum 3 web searches. Return ONLY valid JSON — no prose, no markdown, no backticks. Every insight must be named and specific. No generic advice.",
+          messages: [{ role: "user", content: buildStage1Prompt(form) }],
+        }),
+      });
+      const s1Data = await s1Res.json();
+      console.log(`[S1] tokens: in:${s1Data.usage?.input_tokens} out:${s1Data.usage?.output_tokens}`);
 
-        const parsedBlueprint = parseOrRepairJson(blueprintResponse.text, "Blueprint");
-        blueprint = parsedBlueprint.json;
-        if (parsedBlueprint.repaired) console.log("[Blueprint] jsonrepair fixed response");
-      } catch (err) {
-        if (err.name !== "EmptyModelResponseError") throw err;
-        console.warn("[Blueprint] empty after retries; using local fallback blueprint");
-        blueprint = buildLocalBlueprint(form, dayCount);
+      if (s1Data.content) {
+        const txt = s1Data.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+        try {
+          intelligence = parseJsonText(txt);
+        } catch (e) {
+          console.error("[S1 parse error]", txt.slice(0, 200));
+        }
       }
 
-      const expiresAt = new Date();
-      expiresAt.setMonth(expiresAt.getMonth() + 6);
-      const { error: cacheWriteError } = await supabase
-        .from("destination_intelligence")
-        .upsert({
+      // Confidence scoring
+      const conf = scoreIntelligence(intelligence);
+      console.log(`[Conf] grade:${conf.grade} score:${conf.score}/${conf.maxScore}`);
+
+      // Adaptive fallback if low confidence
+      if (conf.grade === "low") {
+        const fbQuery = buildFallbackQuery(form.destinations, conf.weakAreas);
+        console.log(`[Fallback] query: "${fbQuery}"`);
+        const fbRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            max_tokens: 700,
+            tools: [{ type: "web_search_20250305", name: "web_search" }],
+            system: "Run ONE targeted web search. Return compact JSON only — no prose.",
+            messages: [{
+              role: "user",
+              content: `Search: "${fbQuery}"\nReturn ONLY: {"hidden_gems":["named — why"],"hacks":["exact timing"],"stay_areas":["name — why"],"food":["named — what"],"insights":["specific"]}`,
+            }],
+          }),
+        });
+        const fbData = await fbRes.json();
+        if (fbData.content) {
+          const fbTxt = fbData.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+          try {
+            const fbI = parseJsonText(fbTxt);
+            if (fbI.hidden_gems?.length) intelligence.hidden_gems = [...(intelligence.hidden_gems || []), ...fbI.hidden_gems].slice(0, 6);
+            if (fbI.hacks?.length) intelligence.crowd_hacks = [...(intelligence.crowd_hacks || []), ...fbI.hacks].slice(0, 5);
+            if (fbI.food?.length) intelligence.food_spots = [...(intelligence.food_spots || []), ...fbI.food].slice(0, 5);
+            if (fbI.stay_areas?.length) intelligence.best_stay_areas = [...(intelligence.best_stay_areas || []), ...fbI.stay_areas.map((s) => ({ name: s, why: "local rec", avoid_if: "" }))].slice(0, 4);
+            if (fbI.insights?.length) intelligence.local_timing = [intelligence.local_timing, ...fbI.insights].filter(Boolean).join(" | ");
+            console.log("[Fallback] intelligence merged");
+          } catch (e) {
+            console.log("[Fallback] parse failed");
+          }
+        }
+      }
+
+      // Write to cache
+      try {
+        const exp = new Date();
+        exp.setMonth(exp.getMonth() + 6);
+        await supabase.from("destination_intelligence").upsert({
           cache_key: cacheKey,
           destination: form.destinations,
-          intelligence_json: blueprint,
-          expires_at: expiresAt.toISOString(),
+          intelligence_json: intelligence,
+          expires_at: exp.toISOString(),
         }, { onConflict: "cache_key" });
-
-      if (cacheWriteError) {
-        console.warn(`[Cache Write Error] ${cacheWriteError.message}`);
-      } else {
-        console.log(`[Cache Write] ${cacheKey}`);
+        console.log(`[Cache WRITE] ${cacheKey}`);
+      } catch (e) {
+        console.error("[Cache WRITE ERROR]", e.message);
       }
     }
 
-    console.log(`[Sections] ${chunks.length} chunks via ${DEEPSEEK_SECTION_MODEL}`);
-    const sectionResponses = await Promise.all(chunks.map(async (chunk) => {
-      const maxTokens = Math.min(5200, 2200 + chunk.days.length * 950);
-      const response = await callDeepSeekJSONWithRetry({
-        model: DEEPSEEK_SECTION_MODEL,
-        maxTokens,
-        system: BRAND_SYSTEM,
-        user: buildSectionPrompt({ form, dayCount, chunk, blueprint }),
-        label: `Days ${chunk.start}-${chunk.end}`,
-      }, 1);
-      const parsed = parseOrRepairJson(response.text, `Days ${chunk.start}-${chunk.end}`);
-      if (parsed.repaired) console.log(`[Sections] jsonrepair fixed days ${chunk.start}-${chunk.end}`);
-      const days = asArray(parsed.json?.days).map((day, index) => ({
-        ...day,
-        dayNumber: Number(day?.dayNumber) || chunk.days[index] || chunk.start + index,
-      }));
-      return { json: { ...parsed.json, days }, usage: response.usage };
-    }));
+    // ── STAGE 2A: Overview ────────────────────────────────────
+    const dayCount = getDayCount(form.dateFrom, form.dateTo);
+    console.log(`[Overview] generating — ${dayCount} days`);
 
-    const trip = assembleTrip({ blueprint, dayChunks: sectionResponses.map((section) => section.json), dayCount });
-    const cleaned = JSON.stringify(trip);
-    let tripId = null;
+    const ovRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: "claude-haiku-4-5",
+        max_tokens: 2000,
+        system: PHILOSOPHY_SYSTEM,
+        messages: [{ role: "user", content: buildOverviewPrompt(form, intelligence, dayCount) }],
+      }),
+    });
+    const ovData = await ovRes.json();
+    console.log(`[Overview] tokens: in:${ovData.usage?.input_tokens} out:${ovData.usage?.output_tokens}`);
 
-    const { data: savedTrip, error: tripSaveError } = await supabase
-      .from("trips")
-      .insert({
-        trip_data: trip,
-        destination: form.destinations,
-      })
-      .select("id")
-      .single();
-
-    if (tripSaveError) {
-      console.warn(`[Trip Save Error] ${tripSaveError.message}`);
-    } else {
-      tripId = savedTrip?.id || null;
-      console.log(`[Trip Save] ${tripId}`);
+    const ovTxt = (ovData.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+    let overview = {};
+    try {
+      overview = parseJsonText(ovTxt);
+    } catch (e) {
+      console.error("[Overview parse error]", ovTxt.slice(0, 300));
+      return res.status(500).json({ error: "Overview generation failed. Try again." });
     }
 
-    console.log(`[Done] ${form.destinations} | days:${trip.days.length} | chunks:${chunks.length}`);
+    // ── STAGE 2B: Day chunks ──────────────────────────────────
+    const dayNumbers = Array.from({ length: dayCount }, (_, i) => i + 1);
+    const chunks = chunkArray(dayNumbers, 3);
+    const allDays = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+      console.log(`[Chunk ${i + 1}] days ${chunk[0]}-${chunk[chunk.length - 1]}`);
+
+      const generateChunk = async () => {
+        const chRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            model: "claude-haiku-4-5",
+            max_tokens: 4000,
+            system: PHILOSOPHY_SYSTEM,
+            messages: [{ role: "user", content: buildChunkPrompt(form, intelligence, overview, chunk, dayCount) }],
+          }),
+        });
+        const chData = await chRes.json();
+        console.log(`[Chunk ${i + 1}] tokens: in:${chData.usage?.input_tokens} out:${chData.usage?.output_tokens}`);
+        const chTxt = (chData.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+        return parseJsonText(chTxt);
+      };
+
+      try {
+        const days = await generateChunk();
+        allDays.push(...days);
+      } catch (e) {
+        console.log(`[Chunk ${i + 1}] failed — retrying`);
+        await new Promise((r) => setTimeout(r, 1000));
+        try {
+          const days = await generateChunk();
+          allDays.push(...days);
+        } catch (e2) {
+          console.error(`[Chunk ${i + 1}] retry failed`);
+          return res.status(500).json({ error: `Generation failed for days ${chunk[0]}-${chunk[chunk.length - 1]}. Try again.` });
+        }
+      }
+
+      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, 300));
+    }
+
+    // ── ASSEMBLE ──────────────────────────────────────────────
+    const finalTrip = {
+      ...overview,
+      days: allDays.sort((a, b) => a.dayNumber - b.dayNumber),
+    };
+    console.log(`[Done] ${form.destinations} | ${dayCount} days | ${chunks.length} chunks | cache:${cacheHit}`);
+
+    // ── SAVE TRIP ─────────────────────────────────────────────
+    let tripId = null;
+    try {
+      const { data: savedTrip } = await supabase
+        .from("trips")
+        .insert({ trip_data: finalTrip, destination: form.destinations })
+        .select("id")
+        .single();
+      tripId = savedTrip?.id;
+      console.log(`[Trip SAVED] ${tripId}`);
+    } catch (e) {
+      console.error("[Trip SAVE ERROR]", e.message);
+    }
+
     return res.status(200).json({
-      trip,
+      content: [{ type: "text", text: JSON.stringify(finalTrip) }],
       tripId,
       cacheHit,
-      content: [{ type: "text", text: cleaned }],
-      usage: {
-        blueprint: blueprintResponse.usage,
-        sections: sectionResponses.map((section) => section.usage).filter(Boolean),
-      },
     });
-
   } catch (err) {
-    console.error("[Generate Error]", err);
-    if (err.name === "AbortError") {
-      return res.status(504).json({ error: "Generation took too long. Please try again, or reduce the trip length/details." });
-    }
+    console.error("[Error]", err);
     return res.status(500).json({ error: err.message });
   }
 }

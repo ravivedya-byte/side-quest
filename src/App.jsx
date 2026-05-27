@@ -105,6 +105,17 @@ const FACTS = [
   "Patagonia at the tip of South America is one of the least populated regions on Earth",
 ];
 
+const CURRENCIES = [
+  { code: "INR", symbol: "₹", label: "₹ INR" },
+  { code: "USD", symbol: "$", label: "$ USD" },
+  { code: "EUR", symbol: "€", label: "€ EUR" },
+  { code: "GBP", symbol: "£", label: "£ GBP" },
+  { code: "JPY", symbol: "¥", label: "¥ JPY" },
+  { code: "SGD", symbol: "S$", label: "S$ SGD" },
+  { code: "THB", symbol: "฿", label: "฿ THB" },
+  { code: "AUD", symbol: "A$", label: "A$ AUD" },
+];
+
 const RMSGS = [
   "Building the route-level blueprint…",
   "Splitting the trip into detailed day sections…",
@@ -612,7 +623,7 @@ function Outro({ budget, different, packing }) {
 }
 
 // ── REFINE PANEL ───────────────────────────────────────────────────────────────
-function RefinePanel({ trip, form, onUpdate }) {
+function RefinePanel({ trip, form, onUpdate, tripId }) {
   const [req, setReq] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -625,11 +636,13 @@ function RefinePanel({ trip, form, onUpdate }) {
       const tripContext = `${form.people} people, ${form.travelMode}, ${form.budget}/person, ${form.dateFrom || ""} to ${form.dateTo || ""}${form.prioritizeWomensSafety ? ", women's safety prioritized" : ""}`;
       const res = await fetch("/api/refine", {
         method:"POST", headers:{"Content-Type":"application/json"},
-        body: JSON.stringify({ trip, request:req, tripContext }),
+        body: JSON.stringify({ trip, instruction: req, tripId }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      onUpdate(data.trip);
+      const raw = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      const jsonStr = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+      onUpdate(JSON.parse(jsonStr));
       setLastChange(req);
       setReq("");
     } catch(e) {
@@ -922,12 +935,28 @@ function Form({ form, onChange, onSubmit, err }) {
               </div>
 
               <div style={{ marginBottom: 18 }}>
+                <label style={lbl}>Currency</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {CURRENCIES.map((c) => (
+                    <button
+                      key={c.code}
+                      type="button"
+                      onClick={() => onChange({ currency: c.code, currencySymbol: c.symbol })}
+                      style={pillBtn(form.currency === c.code)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ marginBottom: 18 }}>
                 <label style={lbl}>Budget per person</label>
                 <div style={wrap}>
                   <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
                     <IconTag />
                   </span>
-                  <input className="sq-input" style={inp} type="text" placeholder="₹25,000 / $800 / 600 euros" value={form.budget} onChange={(e) => s("budget", e.target.value)} />
+                  <input className="sq-input" style={inp} type="text" placeholder={`${form.currencySymbol || "₹"}25,000`} value={form.budget} onChange={(e) => s("budget", e.target.value)} />
                 </div>
               </div>
 
@@ -1176,7 +1205,7 @@ function Result({ trip, setTrip, form, onReset, tripId, isShared }) {
           ))}
           <FoodMap foodMap={trip.foodMap} />
           <Outro budget={trip.costs} different={trip.differentiators} packing={trip.packing} />
-          {!isShared && <RefinePanel trip={trip} form={form} onUpdate={setTrip} />}
+          {!isShared && <RefinePanel trip={trip} form={form} onUpdate={setTrip} tripId={tripId} />}
         </div>
       </div>
     </div>
@@ -1202,6 +1231,8 @@ export default function SideQuest() {
     dateTo: "",
     travelMode: "Suggested",
     people: "2",
+    currency: "INR",
+    currencySymbol: "₹",
     budget: "",
     preferences: "",
     prioritizeWomensSafety: false,
@@ -1274,12 +1305,13 @@ export default function SideQuest() {
         throw new Error(`Server returned a non-JSON response (${res.status}). Check the latest Vercel function logs.`);
       }
       if (data.error) throw new Error(data.error);
-      const parsed = data.trip || (() => {
-        const raw = (data.content||[]).filter(b=>b.type==="text").map(b=>b.text).join("");
-        const jsonStr = raw.replace(/^```json\s*/i,"").replace(/^```\s*/i,"").replace(/\s*```$/i,"").trim();
-        return JSON.parse(jsonStr);
-      })();
-      setTrip(parsed); setTripId(data.tripId || null); setPhase("result"); window.scrollTo(0,0);
+      const raw = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+      const jsonStr = raw.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/i, "").trim();
+      const parsed = JSON.parse(jsonStr);
+      setTrip(parsed);
+      setTripId(data.tripId || null);
+      setPhase("result");
+      window.scrollTo(0, 0);
     } catch(e) {
       const msg = e instanceof SyntaxError ? "Itinerary response was not valid JSON after server repair. Try a shorter trip or fewer days." : "Something went wrong — "+e.message;
       setErr(msg); setPhase("form");
