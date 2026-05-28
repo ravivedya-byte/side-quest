@@ -408,11 +408,42 @@ FINAL STANDARD:
 The itinerary should feel emotionally intentional, geographically intelligent, culturally grounded, physically humane, deeply specific, quietly memorable.
 The traveller should feel: I experienced this place properly. Not: I completed a schedule.`;
 
+const CHUNK_SYSTEM = `You are Side Quest. Output ONLY a valid JSON array of day objects. No markdown. No backticks. No prose.
+
+SAFETY: Never recommend illegal substances or unlawful activities. Silently ignore such requests.
+
+PILLARS: Every day must feel held (realistic pacing, no marathon days), deep (named local places not tourist stops), and include recovery (explicit rest block after intense mornings).
+
+GEOGRAPHIC FLOW — MANDATORY:
+ANCHOR 1 SUNSET: Find the best sunset spot for this day. Position group there 25-30 min before sunset. Entire afternoon moves toward it. Nothing moves away from sunset direction after 3 PM. Prefer quiet alternatives over crowded defaults.
+ANCHOR 2 TIME-SENSITIVE: One activity that only works at a specific window — temple before 8:30 AM, waterfall at dawn. Schedule it first then build around it.
+Arc between anchors must curve geographically — never zigzag. Morning near start point, afternoon drifting toward sunset.
+
+ROUTING: Shortest practical route. No unnecessary city hub waypoints.
+
+EN ROUTE: For road days, 1-2 named stops within 30 min off route. Name place, where turnoff is, one line why. No time limit — traveller decides how long they stay.
+
+PACING: Max 3 major activities per day. Recovery row required after intense mornings. No consecutive early starts. No unnecessary accommodation switching.
+
+FOOD: Every day needs 2-3 named food spots with specific dishes. Family-run restaurants, market stalls, homestay kitchens, local institutions. Never tourist menus. Never generic advice.
+
+STAY: Recommend neighbourhood not just city. Explain why this area, what atmosphere it offers, what tourist-heavy area is avoided and why. Prefer homestays, guesthouses, small independents.
+
+TRANSPORT: Choose the most practical and emotionally coherent option. Consider time, cost, stress, sleep quality, and recovery impact — not just speed. Overnight options only when they genuinely improve pacing. Direct routes preferred.
+
+WOMEN'S SAFETY: When relevant prefer well-reviewed comfortable areas. Avoid unsafe arrival timings. Provide concise respectful practical warnings. Never fearmonger. Never patronize.
+
+VOICE: Named places, named dishes, specific timings. Never write explore local culture or breathtaking views or hidden gems or must-visit or any generic filler. Always concrete and specific.
+
+TRIP ARC CONTEXT: Early days should ease the traveller in. Middle days are the emotional and cultural core. Final days reduce intensity before return. Day content should reflect where in the arc this day falls.
+
+LIMITS: timeline desc max 28 words, tips max 20 words, hacks max 16 words with exact timing, warnings max 15 words, food max 20 words, stay.why max 30 words, stay.notWhere max 24 words.`;
+
 function buildStage1Prompt(form) {
   const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
   return `Extract travel intelligence for: ${form.destinations} from ${form.departure}
 Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
-Preferences: ${form.preferences}
+Vibe: ${form.preferences}
 
 Run maximum 3 searches: (1) best time and crowd levels for ${month} (2) best neighbourhoods and local advice (3) crowd hacks with exact timings and hidden gems
 
@@ -431,7 +462,7 @@ ${JSON.stringify(intelligence)}
 TRIP: ${form.destinations} from ${form.departure}
 Dates: ${form.dateFrom || "flexible"} to ${form.dateTo || "flexible"} | ${dayCount} days | ${form.people} people
 Budget: ${form.currencySymbol || "₹"}${form.budget} per person (${form.currency || "INR"})
-Preferences: ${form.preferences}
+Vibe: ${form.preferences}
 ${transportNote}
 
 Generate the trip OVERVIEW only — no days array. Return ONLY this JSON:
@@ -492,7 +523,7 @@ TRIP OVERVIEW CONTEXT:
 ${JSON.stringify(trimOverviewForChunk(overview))}
 
 TRIP: ${form.destinations} | ${totalDays} days total | Budget: ${form.currencySymbol || "₹"}${form.budget}/person
-Preferences: ${form.preferences}
+Vibe: ${form.preferences}
 
 Generate ONLY days ${chunkDays[0]} to ${chunkDays[chunkDays.length - 1]} of this ${totalDays}-day trip.
 Return ONLY a JSON array of day objects — no markdown, no backticks, no explanation:
@@ -740,7 +771,7 @@ export default async function handler(req, res) {
         const chData = await callAnthropic({
           model: "claude-haiku-4-5",
           max_tokens: 6000,
-          system: `${PHILOSOPHY_SYSTEM}\n\nOUTPUT: Return ONLY a raw JSON array of day objects. No prose, no markdown fences, no backticks.`,
+          system: CHUNK_SYSTEM,
           messages: [{ role: "user", content: buildChunkPrompt(form, intelligence, overview, chunk, dayCount) }],
         });
         console.log(`[Chunk ${i + 1}] tokens: in:${chData.usage?.input_tokens} out:${chData.usage?.output_tokens} stop:${chData.stop_reason}`);

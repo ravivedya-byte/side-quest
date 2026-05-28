@@ -973,12 +973,12 @@ function Form({ form, onChange, onSubmit, err }) {
 
               <div style={{ marginBottom: 18 }}>
                 <label style={lbl}>
-                  Your travel preferences <span style={{ color: T.accent }}>*</span>
+                  What's your vibe? <span style={{ color: T.accent }}>*</span>
                 </label>
                 <textarea
                   className="sq-input"
                   style={{ ...inp, minHeight: 96, lineHeight: 1.65, paddingLeft: 16 }}
-                  placeholder="Travel style, pace, interests, things to avoid, dietary needs, photography, nightlife, solitude — anything that helps us build a better blueprint"
+                  placeholder="Slow mornings, local food, off the beaten path... bonfires and cold water... city culture and long walks... tell us what feels right"
                   value={form.preferences}
                   onChange={(e) => s("preferences", e.target.value)}
                 />
