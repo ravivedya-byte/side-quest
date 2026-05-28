@@ -463,12 +463,33 @@ Generate the trip OVERVIEW only — no days array. Return ONLY this JSON:
 }`;
 }
 
+function trimIntelligenceForChunk(intelligence) {
+  return {
+    hidden_gems: (intelligence.hidden_gems||[]).slice(0,3),
+    food_spots: (intelligence.food_spots||[]).slice(0,3),
+    crowd_hacks: (intelligence.crowd_hacks||[]).slice(0,3),
+    tourist_traps: (intelligence.tourist_traps||[]).slice(0,2),
+    transport_notes: intelligence.transport_notes||"",
+    local_timing: intelligence.local_timing||"",
+    season_notes: intelligence.season_notes||"",
+  };
+}
+
+function trimOverviewForChunk(overview) {
+  return {
+    tripTitle: overview.tripTitle||"",
+    travelStyle: overview.travelStyle||"",
+    moodTags: overview.moodTags||[],
+    overview: overview.overview||{},
+  };
+}
+
 function buildChunkPrompt(form, intelligence, overview, chunkDays, totalDays) {
   return `RESEARCH INTELLIGENCE:
-${JSON.stringify(intelligence)}
+${JSON.stringify(trimIntelligenceForChunk(intelligence))}
 
 TRIP OVERVIEW CONTEXT:
-${JSON.stringify(overview)}
+${JSON.stringify(trimOverviewForChunk(overview))}
 
 TRIP: ${form.destinations} | ${totalDays} days total | Budget: ${form.currencySymbol || "₹"}${form.budget}/person
 Preferences: ${form.preferences}
@@ -747,7 +768,7 @@ export default async function handler(req, res) {
         }
       }
 
-      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, 300));
+      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, 800));
     }
 
     // ── ASSEMBLE ──────────────────────────────────────────────
