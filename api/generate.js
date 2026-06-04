@@ -6,6 +6,44 @@ const headers = {
   "anthropic-version": "2023-06-01",
 };
 
+async function fetchWithTimeout(url, options, timeoutMs = 55000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(timer);
+    return res;
+  } catch (err) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") throw new Error("Request timed out after 55 seconds");
+    throw err;
+  }
+}
+
+function validateTrip(trip, expectedDayCount) {
+  const issues = [];
+  if (!trip.tripTitle) issues.push("missing tripTitle");
+  if (!trip.philosophy) issues.push("missing philosophy");
+  if (!trip.days || !Array.isArray(trip.days)) issues.push("missing days array");
+  if (trip.days) {
+    if (trip.days.length !== expectedDayCount) {
+      issues.push(`expected ${expectedDayCount} days, got ${trip.days.length}`);
+    }
+    trip.days.forEach((day, i) => {
+      const d = i + 1;
+      if (!day.place) issues.push(`day ${d} missing place`);
+      if (!day.timeline || day.timeline.length === 0) issues.push(`day ${d} missing timeline`);
+      if (!day.food || day.food.length === 0) issues.push(`day ${d} missing food`);
+      if (!day.stay || !day.stay.locality) issues.push(`day ${d} missing stay`);
+      if (!day.budget) issues.push(`day ${d} missing budget`);
+      const hasSunset = day.timeline?.some(t => t.type === "sunset");
+      if (!hasSunset) issues.push(`day ${d} missing sunset entry`);
+    });
+    if (!trip.costs || !trip.costs.total) issues.push("missing or empty costs breakdown");
+  }
+  return issues;
+}
+
 function normaliseCacheKey(destination) {
   return destination.toLowerCase().trim().split(",")[0].trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
 }
@@ -606,7 +644,7 @@ function hasUsableIntelligence(intel) {
 }
 
 async function callAnthropic(body) {
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+  const response = await fetchWithTimeout("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers,
     body: JSON.stringify(body),
@@ -630,6 +668,16 @@ export default async function handler(req, res) {
 
   const { form } = req.body;
   if (!form || !form.destinations) return res.status(400).json({ error: "Missing form data" });
+
+  if (form.destinations && form.destinations.length > 200) {
+    return res.status(400).json({ error: "Destination is too long. Please keep it under 200 characters." });
+  }
+  if (form.preferences && form.preferences.length > 500) {
+    return res.status(400).json({ error: "Vibe description is too long. Please keep it under 500 characters." });
+  }
+  if (form.departure && form.departure.length > 100) {
+    return res.status(400).json({ error: "Departure location is too long." });
+  }
 
   try {
     // ── CACHE LOOKUP ──────────────────────────────────────────
@@ -787,27 +835,38 @@ export default async function handler(req, res) {
       try {
         const days = await generateChunk();
         allDays.push(...days);
-      } catch (e) {
-        console.log(`[Chunk ${i + 1}] failed (${e.message}) — retrying`);
-        await new Promise((r) => setTimeout(r, 1000));
-        try {
-          const days = await generateChunk();
-          allDays.push(...days);
-        } catch (e2) {
-          console.error(`[Chunk ${i + 1}] retry failed:`, e2.message);
-          return res.status(500).json({ error: `Generation failed for days ${chunk[0]}-${chunk[chunk.length - 1]}. Try again.` });
-        }
+      } catch(e) {
+        console.error(`[Chunk ${i+1}] failed: ${e.message}`);
+        return res.status(500).json({ error: "Generation failed. Please wait 60 seconds before trying again." });
       }
 
-      if (i < chunks.length - 1) await new Promise((r) => setTimeout(r, 800));
+      if (i < chunks.length-1) await new Promise(r=>setTimeout(r,800));
     }
 
     // ── ASSEMBLE ──────────────────────────────────────────────
+    const sortedDays = allDays
+      .sort((a,b) => a.dayNumber - b.dayNumber)
+      .map((day, index) => ({ ...day, dayNumber: index + 1 }));
+
     const finalTrip = {
       ...overview,
-      days: allDays.sort((a, b) => a.dayNumber - b.dayNumber),
+      days: sortedDays,
     };
     console.log(`[Done] ${form.destinations} | ${dayCount} days | ${chunks.length} chunks | cache:${cacheHit}`);
+
+    // ── VALIDATION ────────────────────────────────────────────
+    const validationIssues = validateTrip(finalTrip, dayCount);
+    if (validationIssues.length > 0) {
+      console.warn(`[Validation] ${validationIssues.length} issues: ${validationIssues.join(", ")}`);
+    } else {
+      console.log(`[Validation] passed — ${dayCount} days, all fields present`);
+    }
+
+    if (validationIssues.some(i => i.includes("missing days array") || i.includes("expected"))) {
+      return res.status(500).json({
+        error: `Generation incomplete — only ${finalTrip.days?.length||0} of ${dayCount} days generated. Please wait 60 seconds before trying again.`
+      });
+    }
 
     // ── SAVE TRIP ─────────────────────────────────────────────
     let tripId = null;

@@ -808,7 +808,7 @@ function Loading({ factIdx, msgIdx }) {
 }
 
 // ── FORM ─────────────────────────────────────────────────────────────────────
-function Form({ form, onChange, onSubmit, err }) {
+function Form({ form, onChange, onSubmit, err, cooldownSeconds = 0 }) {
   const wrap = { position: "relative" };
   const inp = {
     width: "100%",
@@ -889,7 +889,7 @@ function Form({ form, onChange, onSubmit, err }) {
                   <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
                     <IconPin />
                   </span>
-                  <input className="sq-input" style={inp} type="text" placeholder="Kyoto, Japan — Amalfi Coast — Coorg, Karnataka" value={form.destinations} onChange={(e) => s("destinations", e.target.value)} />
+                  <input className="sq-input" style={inp} type="text" maxLength={200} placeholder="Kyoto, Japan — Amalfi Coast — Coorg, Karnataka" value={form.destinations} onChange={(e) => s("destinations", e.target.value)} />
                 </div>
               </div>
 
@@ -899,7 +899,7 @@ function Form({ form, onChange, onSubmit, err }) {
                   <span style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", display: "flex", pointerEvents: "none" }}>
                     <IconPin />
                   </span>
-                  <input className="sq-input" style={inp} type="text" placeholder="Bengaluru, London, New York…" value={form.departure} onChange={(e) => s("departure", e.target.value)} />
+                  <input className="sq-input" style={inp} type="text" maxLength={100} placeholder="Bengaluru, London, New York…" value={form.departure} onChange={(e) => s("departure", e.target.value)} />
                 </div>
               </div>
 
@@ -978,6 +978,7 @@ function Form({ form, onChange, onSubmit, err }) {
                 <textarea
                   className="sq-input"
                   style={{ ...inp, minHeight: 96, lineHeight: 1.65, paddingLeft: 16 }}
+                  maxLength={500}
                   placeholder="Slow mornings, local food, off the beaten path... bonfires and cold water... city culture and long walks... tell us what feels right"
                   value={form.preferences}
                   onChange={(e) => s("preferences", e.target.value)}
@@ -1016,6 +1017,7 @@ function Form({ form, onChange, onSubmit, err }) {
 
               <button
                 type="button"
+                disabled={cooldownSeconds > 0}
                 onClick={onSubmit}
                 style={{
                   width: "100%",
@@ -1028,7 +1030,8 @@ function Form({ form, onChange, onSubmit, err }) {
                   fontSize: "0.78rem",
                   letterSpacing: "0.22em",
                   textTransform: "uppercase",
-                  cursor: "pointer",
+                  cursor: cooldownSeconds > 0 ? "not-allowed" : "pointer",
+                  opacity: cooldownSeconds > 0 ? 0.5 : 1,
                   borderRadius: 14,
                   display: "flex",
                   alignItems: "center",
@@ -1037,10 +1040,10 @@ function Form({ form, onChange, onSubmit, err }) {
                   boxShadow: "0 10px 32px rgba(201,84,32,0.35)",
                   transition: "background .2s, transform .15s",
                 }}
-                onMouseOver={(e) => (e.currentTarget.style.background = T.accentHover)}
+                onMouseOver={(e) => { if (cooldownSeconds === 0) e.currentTarget.style.background = T.accentHover; }}
                 onMouseOut={(e) => (e.currentTarget.style.background = T.accent)}
               >
-                Build my blueprint <span aria-hidden>→</span>
+                {cooldownSeconds > 0 ? `Wait ${cooldownSeconds}s…` : <>Build my blueprint <span aria-hidden>→</span></>}
               </button>
 
               <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 16, marginTop: 28, paddingTop: 22, borderTop: `1px solid ${T.line}` }}>
@@ -1244,6 +1247,7 @@ export default function SideQuest() {
   const [factIdx, setFactIdx] = useState(0);
   const [msgIdx, setMsgIdx] = useState(0);
   const [err, setErr] = useState("");
+  const [cooldownSeconds, setCooldownSeconds] = useState(0);
 
   useEffect(() => {
     if (phase!=="loading") return;
@@ -1313,6 +1317,22 @@ export default function SideQuest() {
       setPhase("result");
       window.scrollTo(0, 0);
     } catch(e) {
+      const errorMessage = e?.message || "";
+      if (errorMessage.includes("wait 60 seconds") || errorMessage.includes("rate limit") || errorMessage.includes("exceeded")) {
+        let seconds = 60;
+        setCooldownSeconds(seconds);
+        setErr("High demand right now — please wait a minute and try again.");
+        setPhase("form");
+        const countdown = setInterval(() => {
+          seconds -= 1;
+          setCooldownSeconds(seconds);
+          if (seconds <= 0) {
+            clearInterval(countdown);
+            setCooldownSeconds(0);
+          }
+        }, 1000);
+        return;
+      }
       const msg = e instanceof SyntaxError ? "Itinerary response was not valid JSON after server repair. Try a shorter trip or fewer days." : "Something went wrong — "+e.message;
       setErr(msg); setPhase("form");
     }
@@ -1326,5 +1346,5 @@ export default function SideQuest() {
   );
   if (phase==="loading" || sharedTripLoading) return <Loading factIdx={factIdx} msgIdx={msgIdx}/>;
   if (phase==="result"&&trip) return <Result trip={trip} tripId={tripId} isShared={phase === "result" && window.location.pathname.startsWith("/trip/")} setTrip={setTrip} form={form} onReset={()=>{ setPhase("form"); setTrip(null); setTripId(null); window.scrollTo(0,0); }}/>;
-  return <Form form={form} onChange={onChange} onSubmit={generate} err={err}/>;
+  return <Form form={form} onChange={onChange} onSubmit={generate} err={err} cooldownSeconds={cooldownSeconds}/>;
 }
