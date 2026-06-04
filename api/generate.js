@@ -478,12 +478,15 @@ TRIP ARC CONTEXT: Early days should ease the traveller in. Middle days are the e
 LIMITS: timeline desc max 28 words, tips max 20 words, hacks max 16 words with exact timing, warnings max 15 words, food max 20 words, stay.why max 30 words, stay.notWhere max 24 words.`;
 
 function buildStage1Prompt(form) {
-  const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en", { month: "long" }) : "peak season";
+  const month = form.dateFrom ? new Date(form.dateFrom).toLocaleString("en",{month:"long"}) : "peak season";
   return `Extract travel intelligence for: ${form.destinations} from ${form.departure}
-Dates: ${form.dateFrom || ""} to ${form.dateTo || ""} (${month}) | Transport: ${form.travelMode}
+Dates: ${form.dateFrom||""} to ${form.dateTo||""} (${month}) | Transport: ${form.travelMode}
 Vibe: ${form.preferences}
 
-Run maximum 3 searches: (1) best time and crowd levels for ${month} (2) best neighbourhoods and local advice (3) crowd hacks with exact timings and hidden gems
+Run exactly 3 searches using these exact queries:
+1. "site:reddit.com ${form.destinations} travel tips hidden gems locals"
+2. "site:reddit.com ${form.destinations} best time visit crowds ${month}"
+3. "site:reddit.com ${form.destinations} where to stay eat local recommendations"
 
 Return ONLY this JSON — no prose, no markdown, no backticks:
 {"season_notes":"specific to ${month}","crowd_level":"low/medium/high + reason","best_stay_areas":[{"name":"","why":"specific","avoid_if":""}],"hidden_gems":["Named Place — why locals go"],"tourist_traps":["Named Trap — why avoid"],"crowd_hacks":["hack with exact time e.g. before 7:30 AM"],"food_spots":["Named Place — what to order — price if known"],"transport_notes":"specific advice","seasonal_warnings":["specific warning"],"local_timing":"daily rhythms specific to destination"}`;
@@ -707,7 +710,7 @@ export default async function handler(req, res) {
         console.log(`[S1] Researching: ${form.destinations}`);
         const s1Data = await callAnthropic({
           model: "claude-haiku-4-5",
-          max_tokens: 1200,
+          max_tokens: 2000,
           tools: [{ type: "web_search_20250305", name: "web_search" }],
           system: "You are a compact travel intelligence extractor. Run maximum 3 web searches. Your entire reply must be one raw JSON object starting with { — no introduction, no markdown fences, no backticks, no <cite> tags. Plain JSON only.",
           messages: [{ role: "user", content: buildStage1Prompt(form) }],
